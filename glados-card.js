@@ -803,6 +803,14 @@ class GladosCard extends HTMLElement {
         let moveDur = beatSec;
         let bodyDur = beatSec * 2;
 
+        const executeTick = () => {
+          dancePhase++;
+          const now = performance.now();
+          expectedNextTick += beatMs;
+          const delay = Math.max(0, expectedNextTick - now);
+          this.danceTimer = setTimeout(step, delay);
+        };
+
         if (currentBpm < 90) {
            moveDur = beatSec * 2; bodyDur = beatSec * 4; ease = "ease-in-out"; lid = 0.4;
            if (choreoBlock === 0) { r = isQuadBeat ? 8 : -8; tx = isQuadBeat ? 5 : -5; ty = 2; }
@@ -855,13 +863,6 @@ class GladosCard extends HTMLElement {
         setBodySwivel(r * -0.8, 1, bodyDur);
         setBaseLid(lid, beatSec * 0.5);
 
-        const executeTick = () => {
-          dancePhase++;
-          const now = performance.now();
-          expectedNextTick += beatMs;
-          const delay = Math.max(0, expectedNextTick - now);
-          this.danceTimer = setTimeout(step, delay);
-        };
         executeTick();
       };
       
