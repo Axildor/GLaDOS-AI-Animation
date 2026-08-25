@@ -62,6 +62,7 @@ class GladosCard extends HTMLElement {
 
   getCardSize() { return 6; }
 
+  // [PATCH]: Strict isolation of animation loops vs. DOM listeners
   _cleanupTimers() {
     if (this.stopIdleCycle) this.stopIdleCycle();
     if (this.stopDanceCycle) this.stopDanceCycle();
@@ -72,14 +73,6 @@ class GladosCard extends HTMLElement {
     if (this.glitchRaf) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; }
     if (this._bopRaf) { cancelAnimationFrame(this._bopRaf); this._bopRaf = null; }
     this._bopping = false;
-    if (this._boundVisibility) {
-      document.removeEventListener('visibilitychange', this._boundVisibility);
-      this._boundVisibility = null;
-    }
-    if (this._tapHandler) {
-      this.removeEventListener('click', this._tapHandler);
-      this._tapHandler = null;
-    }
   }
 
   connectedCallback() {
@@ -88,8 +81,17 @@ class GladosCard extends HTMLElement {
     }
   }
 
+  // [PATCH]: DOM listeners dismantled ONLY on hard-kill
   disconnectedCallback() { 
     this._cleanupTimers(); 
+    if (this._boundVisibility) {
+      document.removeEventListener('visibilitychange', this._boundVisibility);
+      this._boundVisibility = null;
+    }
+    if (this._tapHandler) {
+      this.removeEventListener('click', this._tapHandler);
+      this._tapHandler = null;
+    }
   }
 
   setupDOM() {
@@ -282,7 +284,9 @@ class GladosCard extends HTMLElement {
     function setBaseLid(amount, dur = 0.7) { currentBaseLid = amount; setLid(amount, dur); }
     function setPupil(px, py) { el.pupil.style.transform = `translate3d(${px}px, ${py}px, 0)`; let ey = py * 1.5; el.eyeball.style.transform = `translate3d(0, ${ey}px, 0)`; el.bellows.style.transform = `translate3d(0, ${ey}px, 0)`; }
     function setLEDs(color, opacity) { currentLedColor = color; currentLedOpacity = opacity; el.svg.style.setProperty('--led-color', color); el.svg.style.setProperty('--led-opacity', opacity); }
+    
     this.lidTimer = null; this.idleTimer = null; this.pupilTimer = null; this.glitchRaf = null; this.danceTimer = null; this.danceLedTimer = null; this.talkAnim = null; this.respondTimer = null; this._bopRaf = null; this._bopping = false;
+    
     const startLidBehavior = () => { if (this.lidTimer) clearTimeout(this.lidTimer); const loop = () => { if (stateNow === 'idle') { let val = Math.max(0, Math.min(1, currentBaseLid + (Math.random() - 0.5) * 0.15)); setLid(val, 0.5 + Math.random() * 0.8); this.lidTimer = setTimeout(loop, 1500 + Math.random() * 2500); } else if (stateNow === 'processing') { let val = 0.5 + (Math.random() * 0.35); setLid(val, 0.04 + Math.random() * 0.08); this.lidTimer = setTimeout(loop, 40 + Math.random() * 120); } }; loop(); };
     const stopLidBehavior = () => { if (this.lidTimer) { clearTimeout(this.lidTimer); this.lidTimer = null; } };
     const IDLE_BEHAVIORS = [
@@ -296,11 +300,14 @@ class GladosCard extends HTMLElement {
       { name: 'full_swivel', exec() { setBodySwivel(-6, 0.96, 2.5); setTimeout(() => { setHead(6, 0, -3, 1.02, 1.2); setBaseLid(0, 0.8); }, 600); }, min: 4000, max: 8000, weight: 0.8 },
       { name: 'glitch', exec: () => { let count = 0, lastTime = 0; if (this.glitchRaf) cancelAnimationFrame(this.glitchRaf); const glitchLoop = (timestamp) => { if (!lastTime) lastTime = timestamp; if (timestamp - lastTime > 60) { lastTime = timestamp; if (stateNow !== 'idle' || count > 12) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; if (stateNow === 'idle') { el.eyeHalo.setAttribute('fill', '#330800'); el.eyeCenter.setAttribute('fill', '#ffcc00'); setHead(0, 0, 0, 1.0, 0.4); } return; } setHead((Math.random()-0.5)*10, (Math.random()-0.5)*8, (Math.random()-0.5)*8, 1.0, 0.05, "linear"); if (count % 2 === 0) { el.eyeHalo.setAttribute('fill', '#110000'); el.eyeCenter.setAttribute('fill', '#884400'); } else { el.eyeHalo.setAttribute('fill', '#ffb800'); el.eyeCenter.setAttribute('fill', '#ffffff'); } count++; } this.glitchRaf = requestAnimationFrame(glitchLoop); }; this.glitchRaf = requestAnimationFrame(glitchLoop); }, min: 4000, max: 7000, weight: 0.3 }
     ];
+    
     const dartPupil = () => { if (stateNow === 'idle') { const max = 7; setPupil((Math.random() - 0.5) * max * 2, (Math.random() - 0.5) * max * 2); this.pupilTimer = setTimeout(dartPupil, 600 + Math.random() * 2500); } };
     const runNextIdleBehavior = () => { if (stateNow !== 'idle') return; let r = Math.random() * IDLE_BEHAVIORS.reduce((s, b) => s + b.weight, 0), chosen = IDLE_BEHAVIORS[0]; for (const b of IDLE_BEHAVIORS) { r -= b.weight; if (r <= 0) { chosen = b; break; } } try { chosen.exec(); } catch(err) {} this.idleTimer = setTimeout(runNextIdleBehavior, chosen.min + Math.random() * (chosen.max - chosen.min)); };
+    
     this.startIdleCycle = () => { this.stopIdleCycle(); dartPupil(); this.idleTimer = setTimeout(runNextIdleBehavior, 2000 + Math.random() * 3000); };
     this.stopIdleCycle = () => { if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; } if (this.pupilTimer) { clearTimeout(this.pupilTimer); this.pupilTimer = null; } if (this.glitchRaf) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; } };
     this.stopDanceCycle = () => { if (this.danceTimer) { clearTimeout(this.danceTimer); this.danceTimer = null; } if (this.danceLedTimer) { clearTimeout(this.danceLedTimer); this.danceLedTimer = null; } };
+    
     this.startDanceCycle = (bpm) => {
       this.stopDanceCycle();
       let dancePhase = 0; let currentRoutine = Math.floor(Math.random() * 8);
@@ -324,6 +331,7 @@ class GladosCard extends HTMLElement {
       };
       step();
     };
+    
     const TALK_MOVES = [{ r: -10, tx: -8, ty: -18, s: 1.02, dur: 1.8, lid: 0.1, px: 0, py: -2 }, { r: 4, tx: 0, ty: 16, s: 1.08, dur: 1.2, lid: 0.85, px: 0, py: 4 }, { r: 2, tx: 0, ty: 10, s: 1.04, dur: 1.0, lid: 0.5, px: 0, py: 2 }, { r: 12, tx: 10, ty: -12, s: 0.96, dur: 2.2, lid: 0.1, px: 0, py: -1 }, { r: 0, tx: 0, ty: 25, s: 1.10, dur: 1.8, lid: 0.9, px: 0, py: 5 }, { r: -6, tx: 6, ty: -22, s: 0.98, dur: 1.0, lid: 0.1, px: 0, py: -3 }, { r: 4, tx: -3, ty: 6, s: 1.03, dur: 2.0, lid: 0.4, px: 0, py: 1 }, { r: -3, tx: 0, ty: 22, s: 1.15, dur: 1.2, lid: 0.95, px: 0, py: 6 }, { r: 6, tx: 3, ty: -6, s: 1.0, dur: 1.5, lid: 0.2, px: 0, py: 0 }];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
@@ -445,6 +453,7 @@ class GladosCard extends HTMLElement {
         el.eyeLayerRespond.style.opacity = '1'; el.eyeHalo.style.transition = 'fill 0.8s ease-in-out, opacity 0.8s'; el.eyeHalo.setAttribute('fill', '#ff2200'); el.eyeHalo.style.opacity = '0.05'; el.eyeCenter.setAttribute('fill', '#ffaaaa'); if(el.dangerRing) el.dangerRing.setAttribute('opacity', '1'); setLEDs('#ff2200', '1'); setBodySwivel(0, 1, 0.8); startTalkAnim();
       }
     };
+    
     this.applyState = (raw, bpm) => {
       const s = (raw || 'idle').toLowerCase();
       let mapped = 'idle';
@@ -463,6 +472,7 @@ class GladosCard extends HTMLElement {
     this._visibilityHandler = () => {
       if (!this.isConnected) return;
       if (document.hidden) {
+        // [PATCH]: Suspend animations but DO NOT trigger _cleanupTimers() suicide
         this.stopIdleCycle(); this.stopDanceCycle();
         if (this.lidTimer) { clearTimeout(this.lidTimer); this.lidTimer = null; }
         if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
@@ -478,9 +488,11 @@ class GladosCard extends HTMLElement {
         this.applyState(savedState, this._currentBpm || 120);
       }
     };
+    
     if (this._boundVisibility) document.removeEventListener('visibilitychange', this._boundVisibility);
     this._boundVisibility = this._visibilityHandler;
     document.addEventListener('visibilitychange', this._boundVisibility);
+    
     this.applyState('idle', 120);
   }
 }
@@ -497,6 +509,7 @@ class GladosCardEditor extends HTMLElement {
       this.render();
     }
   }
+  
   configChanged(key, value) {
     if (!this._config) return;
     const newConfig = { ...this._config };
@@ -505,12 +518,13 @@ class GladosCardEditor extends HTMLElement {
     this._config = newConfig;
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: newConfig }, bubbles: true, composed: true }));
   }
+  
   render() {
     if (!this._config || !this._hass) return;
     const c = this._config;
     const tapAction = c.tap_action || 'none';
     
-    // [PATCH]: Inverse Translation Algorithm (Backend to UI)
+    // [PATCH]: Piecewise Linear Translation (Backend Config -> UI Slider)
     const backendSpeed = c.tap_speed !== undefined ? c.tap_speed : 0.1;
     let uiValCalc = backendSpeed <= 0.1 ? backendSpeed * 10 : (backendSpeed + 1.8) / 1.9;
     const uiSpeed = uiValCalc.toFixed(1);
@@ -540,14 +554,14 @@ class GladosCardEditor extends HTMLElement {
         <div class="tap-content" id="tap-content">
           <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
           <ha-select outlined label="Tap Action" id="tap-action-select" naturalMenuWidth>
-            <mwc-list-item value="default" ${tapAction === 'default' ? 'selected' : ''}>Default (Toggle)</mwc-list-item>
-            <mwc-list-item value="more-info" ${tapAction === 'more-info' ? 'selected' : ''}>More Info</mwc-list-item>
-            <mwc-list-item value="toggle" ${tapAction === 'toggle' ? 'selected' : ''}>Toggle</mwc-list-item>
-            <mwc-list-item value="navigate" ${tapAction === 'navigate' ? 'selected' : ''}>Navigate</mwc-list-item>
-            <mwc-list-item value="url" ${tapAction === 'url' ? 'selected' : ''}>URL</mwc-list-item>
-            <mwc-list-item value="perform-action" ${tapAction === 'perform-action' ? 'selected' : ''}>Perform Action</mwc-list-item>
-            <mwc-list-item value="assist" ${tapAction === 'assist' ? 'selected' : ''}>Assist</mwc-list-item>
-            <mwc-list-item value="none" ${tapAction === 'none' ? 'selected' : ''}>Nothing</mwc-list-item>
+            <mwc-list-item value="default">Default (Toggle)</mwc-list-item>
+            <mwc-list-item value="more-info">More Info</mwc-list-item>
+            <mwc-list-item value="toggle">Toggle</mwc-list-item>
+            <mwc-list-item value="navigate">Navigate</mwc-list-item>
+            <mwc-list-item value="url">URL</mwc-list-item>
+            <mwc-list-item value="perform-action">Perform Action</mwc-list-item>
+            <mwc-list-item value="assist">Assist</mwc-list-item>
+            <mwc-list-item value="none">Nothing</mwc-list-item>
           </ha-select>
           <div id="nav-path-container" style="display: ${tapAction === 'navigate' ? '' : 'none'}"><paper-input id="nav-path" label="Navigation Path" value="${c.navigation_path || ''}"></paper-input></div>
           <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><paper-input id="url-path" label="URL" value="${c.url_path || ''}"></paper-input></div>
@@ -586,16 +600,19 @@ class GladosCardEditor extends HTMLElement {
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch'); tapSwitch.checked = c.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => this.configChanged('tap_enabled', ev.target.checked));
     
+    // [PATCH]: Explicit Value Binding & Force Re-render loop for HA Select MWC Wrapper
     const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
+    tapActionSelect.value = tapAction; 
     
-    tapActionSelect.addEventListener('closed', (ev) => {
-      const val = ev.target.value;
-      if (!val || val === tapAction) return;
-      this.configChanged('tap_action', val);
-      this.shadowRoot.querySelector('#nav-path-container').style.display = val === 'navigate' ? '' : 'none';
-      this.shadowRoot.querySelector('#url-path-container').style.display = val === 'url' ? '' : 'none';
-      this.shadowRoot.querySelector('#action-path-container').style.display = val === 'perform-action' ? '' : 'none';
-    });
+    const handleTapAction = () => {
+      const val = tapActionSelect.value;
+      if (val && val !== (this._config.tap_action || 'none')) {
+        this.configChanged('tap_action', val);
+        this.render(); 
+      }
+    };
+    tapActionSelect.addEventListener('closed', handleTapAction);
+    tapActionSelect.addEventListener('change', handleTapAction);
 
     const navPath = this.shadowRoot.querySelector('#nav-path');
     if (navPath) navPath.addEventListener('change', (ev) => this.configChanged('navigation_path', ev.target.value));
@@ -606,11 +623,10 @@ class GladosCardEditor extends HTMLElement {
     
     const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
     
-    // [PATCH]: Forward Translation Algorithm (UI to Backend)
+    // [PATCH]: Piecewise Linear Translation (UI Slider -> Backend Config)
     tapSpeedSlider.addEventListener('change', (ev) => { 
       const uiVal = Number(ev.target.value);
       this.shadowRoot.querySelector('#tap-speed-val').innerText = uiVal.toFixed(1); 
-      
       let backendVal = uiVal <= 1.0 ? uiVal / 10 : (1.9 * uiVal) - 1.8;
       this.configChanged('tap_speed', Number(backendVal.toFixed(3))); 
     });
