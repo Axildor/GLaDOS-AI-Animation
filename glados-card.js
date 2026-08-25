@@ -7,7 +7,7 @@ class GladosCard extends HTMLElement {
     this._lastHassBpm = null;
   }
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 1.0, tap_bounces: 4, tap_intensity: 1.0, tap_action: "none" }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 0.2, tap_bounces: 5, tap_intensity: 1.0, tap_action: "none" }; }
   setConfig(config) {
     if (!config.entity && !this.config) {
       this.config = { ...config, entity: 'assist_satellite.example' };
@@ -67,8 +67,8 @@ class GladosCard extends HTMLElement {
       document.removeEventListener('visibilitychange', this._boundVisibility);
       this._boundVisibility = null;
     }
-    if (this._tapHandler && this._svg) {
-      this._svg.removeEventListener('click', this._tapHandler);
+    if (this._tapHandler) {
+      this.removeEventListener('click', this._tapHandler);
       this._tapHandler = null;
     }
   }
@@ -101,57 +101,22 @@ class GladosCard extends HTMLElement {
       <div id="scene">
         <svg id="glados-svg" viewBox="0 116 280 320" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
           <defs>
-            <linearGradient id="ceramicGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#8a8d94"/><stop offset="8%" stop-color="#b0b4bc"/><stop offset="8.5%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffffff"/><stop offset="75%" stop-color="#ffffff"/><stop offset="91.5%" stop-color="#e8eaec"/><stop offset="92%" stop-color="#a0a4ac"/><stop offset="100%" stop-color="#6a6d75"/>
-            </linearGradient>
-            <linearGradient id="ceramicBackgroundGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#4a4d54"/><stop offset="8%" stop-color="#70747c"/><stop offset="8.5%" stop-color="#b0b4bc"/><stop offset="25%" stop-color="#b0b4bc"/><stop offset="75%" stop-color="#b0b4bc"/><stop offset="91.5%" stop-color="#a0a4ac"/><stop offset="92%" stop-color="#6a6d75"/><stop offset="100%" stop-color="#3a3d44"/>
-            </linearGradient>
-            <linearGradient id="ceramicShadow" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/><stop offset="60%" stop-color="#60646c" stop-opacity="0.1"/><stop offset="85%" stop-color="#2a2c32" stop-opacity="0.5"/><stop offset="100%" stop-color="#0a0a0f" stop-opacity="0.85"/>
-            </linearGradient>
-            <linearGradient id="bezelGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#4a4d54"/><stop offset="20%" stop-color="#6a6d75"/><stop offset="50%" stop-color="#3a3c42"/><stop offset="80%" stop-color="#1a1c20"/><stop offset="100%" stop-color="#0a0a0c"/>
-            </linearGradient>
-            <linearGradient id="cavityGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#181a1c"/><stop offset="100%" stop-color="#30353a"/>
-            </linearGradient>
-            <linearGradient id="trackGrad" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stop-color="#1a1c20"/><stop offset="50%" stop-color="#3a3e46"/><stop offset="100%" stop-color="#121316"/>
-            </linearGradient>
-            <radialGradient id="eyeGradIdle" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#ffcc00"/><stop offset="55%" stop-color="#d95500"/><stop offset="80%" stop-color="#7a1100"/><stop offset="100%" stop-color="#110000"/>
-            </radialGradient>
-            <radialGradient id="eyeGradListen" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#aaffff"/><stop offset="60%" stop-color="#00ccff"/><stop offset="85%" stop-color="#0066aa"/><stop offset="100%" stop-color="#001a33"/>
-            </radialGradient>
-            <radialGradient id="eyeGradProcess" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffddaa"/><stop offset="60%" stop-color="#ff6600"/><stop offset="85%" stop-color="#aa3300"/><stop offset="100%" stop-color="#220a00"/>
-            </radialGradient>
-            <radialGradient id="eyeGradRespond" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffaaaa"/><stop offset="60%" stop-color="#ff2200"/><stop offset="85%" stop-color="#aa0000"/><stop offset="100%" stop-color="#220000"/>
-            </radialGradient>
-            <radialGradient id="eyeGradDance" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#aaffaa"/><stop offset="55%" stop-color="#1DB954"/><stop offset="80%" stop-color="#0a5926"/><stop offset="100%" stop-color="#001a00"/>
-            </radialGradient>
-            <filter id="eyeBloom" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="6" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-            <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
-              <feGaussianBlur stdDeviation="2" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-            <filter id="ledGlow" x="-40%" y="-40%" width="180%" height="180%">
-              <feGaussianBlur stdDeviation="2" result="b"/>
-              <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-            </filter>
-            <linearGradient id="lidGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#1f2124"/><stop offset="100%" stop-color="#08090a"/>
-            </linearGradient>
-            <linearGradient id="lidGradFlip" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="0%" stop-color="#1f2124"/><stop offset="100%" stop-color="#08090a"/>
-            </linearGradient>
+            <linearGradient id="ceramicGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8a8d94"/><stop offset="8%" stop-color="#b0b4bc"/><stop offset="8.5%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffffff"/><stop offset="75%" stop-color="#ffffff"/><stop offset="91.5%" stop-color="#e8eaec"/><stop offset="92%" stop-color="#a0a4ac"/><stop offset="100%" stop-color="#6a6d75"/></linearGradient>
+            <linearGradient id="ceramicBackgroundGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4a4d54"/><stop offset="8%" stop-color="#70747c"/><stop offset="8.5%" stop-color="#b0b4bc"/><stop offset="25%" stop-color="#b0b4bc"/><stop offset="75%" stop-color="#b0b4bc"/><stop offset="91.5%" stop-color="#a0a4ac"/><stop offset="92%" stop-color="#6a6d75"/><stop offset="100%" stop-color="#3a3d44"/></linearGradient>
+            <linearGradient id="ceramicShadow" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ffffff" stop-opacity="0"/><stop offset="60%" stop-color="#60646c" stop-opacity="0.1"/><stop offset="85%" stop-color="#2a2c32" stop-opacity="0.5"/><stop offset="100%" stop-color="#0a0a0f" stop-opacity="0.85"/></linearGradient>
+            <linearGradient id="bezelGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4a4d54"/><stop offset="20%" stop-color="#6a6d75"/><stop offset="50%" stop-color="#3a3c42"/><stop offset="80%" stop-color="#1a1c20"/><stop offset="100%" stop-color="#0a0a0c"/></linearGradient>
+            <linearGradient id="cavityGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#181a1c"/><stop offset="100%" stop-color="#30353a"/></linearGradient>
+            <linearGradient id="trackGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#1a1c20"/><stop offset="50%" stop-color="#3a3e46"/><stop offset="100%" stop-color="#121316"/></linearGradient>
+            <radialGradient id="eyeGradIdle" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#ffcc00"/><stop offset="55%" stop-color="#d95500"/><stop offset="80%" stop-color="#7a1100"/><stop offset="100%" stop-color="#110000"/></radialGradient>
+            <radialGradient id="eyeGradListen" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#aaffff"/><stop offset="60%" stop-color="#00ccff"/><stop offset="85%" stop-color="#0066aa"/><stop offset="100%" stop-color="#001a33"/></radialGradient>
+            <radialGradient id="eyeGradProcess" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffddaa"/><stop offset="60%" stop-color="#ff6600"/><stop offset="85%" stop-color="#aa3300"/><stop offset="100%" stop-color="#220a00"/></radialGradient>
+            <radialGradient id="eyeGradRespond" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffaaaa"/><stop offset="60%" stop-color="#ff2200"/><stop offset="85%" stop-color="#aa0000"/><stop offset="100%" stop-color="#220000"/></radialGradient>
+            <radialGradient id="eyeGradDance" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#aaffaa"/><stop offset="55%" stop-color="#1DB954"/><stop offset="80%" stop-color="#0a5926"/><stop offset="100%" stop-color="#001a00"/></radialGradient>
+            <filter id="eyeBloom" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <filter id="ledGlow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+            <linearGradient id="lidGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1f2124"/><stop offset="100%" stop-color="#08090a"/></linearGradient>
+            <linearGradient id="lidGradFlip" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#1f2124"/><stop offset="100%" stop-color="#08090a"/></linearGradient>
             <clipPath id="cavityClip"><rect x="97" y="283.25" width="66" height="161.5" rx="33"/></clipPath>
             <clipPath id="trackClip"><rect x="107" y="293.25" width="46" height="141.5" rx="23"/></clipPath>
             <clipPath id="eyeballClip"><circle cx="130" cy="364" r="25.5"/></clipPath>
@@ -241,7 +206,7 @@ class GladosCard extends HTMLElement {
     const TALK_MOVES = [{ r: -10, tx: -8, ty: -18, s: 1.02, dur: 1.8, lid: 0.1, px: 0, py: -2 }, { r: 4, tx: 0, ty: 16, s: 1.08, dur: 1.2, lid: 0.85, px: 0, py: 4 }, { r: 2, tx: 0, ty: 10, s: 1.04, dur: 1.0, lid: 0.5, px: 0, py: 2 }, { r: 12, tx: 10, ty: -12, s: 0.96, dur: 2.2, lid: 0.1, px: 0, py: -1 }, { r: 0, tx: 0, ty: 25, s: 1.10, dur: 1.8, lid: 0.9, px: 0, py: 5 }, { r: -6, tx: 6, ty: -22, s: 0.98, dur: 1.0, lid: 0.1, px: 0, py: -3 }, { r: 4, tx: -3, ty: 6, s: 1.03, dur: 2.0, lid: 0.4, px: 0, py: 1 }, { r: -3, tx: 0, ty: 22, s: 1.15, dur: 1.2, lid: 0.95, px: 0, py: 6 }, { r: 6, tx: 3, ty: -6, s: 1.0, dur: 1.5, lid: 0.2, px: 0, py: 0 }];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
-    // ── BOP ANIMATION (Spring Physics — underdamped harmonic oscillator) ──
+    // ── BOP ANIMATION (Spring Physics — underdamped, natural decay to zero) ──
     this.bopHead = () => {
       if (this._bopping) return;
       this._bopping = true;
@@ -252,34 +217,37 @@ class GladosCard extends HTMLElement {
       const savedLedOpacity = currentLedOpacity;
       const savedBaseLid = currentBaseLid;
 
-      const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 1.0;
-      const bounces = Math.max(1, Math.min(10, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 4));
+      const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.2;
+      const bounces = Math.max(1, Math.min(10, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
       const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
-      // Proper underdamped spring: dampingRatio < 1 guarantees oscillation
-      const maxAmp = 15 * intensity;        // Target amplitude in pixels
-      const omega = 0.28 * speedMul;       // Angular frequency (higher = faster)
-      const dampingRatio = Math.min(0.85, 0.5 / bounces); // Lower = more bounces
+      // Underdamped spring: ζ < 1 guarantees oscillation.
+      // bounces = number of FULL cycles (up+down) before decay to ~1%.
+      const maxAmp = 15 * intensity;
+      const omega = 0.28 * speedMul;
+      const dampingRatio = Math.min(0.7, 0.6 / bounces);
       const damping = 2 * omega * dampingRatio;
       const stiffness = omega * omega;
-      const initialVelocity = maxAmp * omega; // Kick to reach ~maxAmp
+      const initialVelocity = maxAmp * omega * 1.8;
 
       let position = 0;
       let velocity = initialVelocity;
       if (this._bopRaf) cancelAnimationFrame(this._bopRaf);
-      const startTime = performance.now();
       let lastLedUpdate = 0;
 
       const animate = (now) => {
         if (!this._bopping) return;
-        const elapsed = now - startTime;
 
-        if (elapsed > 12000 || (Math.abs(position) < 0.3 && Math.abs(velocity) < 0.3 && elapsed > 600)) {
+        // Natural decay: stop only when position AND velocity are negligible.
+        // No hard time cutoff — let it bleed to zero smoothly.
+        if (Math.abs(position) < 0.08 && Math.abs(velocity) < 0.08) {
           this._bopping = false;
           this._bopRaf = null;
-          setHead(0, 0, 0, 1.0, 0.3, "ease-out");
+          // Gentle final settle — head returns to rest with a soft transition
+          el.head.style.transition = 'transform 0.4s ease-out';
+          el.head.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
           setLEDs(savedLedColor, savedLedOpacity);
-          setLid(savedBaseLid, 0.3);
+          setLid(savedBaseLid, 0.4);
           if (stateNow === 'idle') { startLidBehavior(); this.startIdleCycle(); }
           return;
         }
@@ -312,7 +280,13 @@ class GladosCard extends HTMLElement {
     };
 
     // ── TAP HANDLER ──
-    if (this._tapHandler && this._svg) { this._svg.removeEventListener('click', this._tapHandler); }
+    // Listen on the host element (this) so clicks work on the Lovelace
+    // dashboard, not just in the editor preview. HA's card wrapper
+    // intercepts SVG-internal clicks, but clicks on the custom element
+    // itself bubble through normally.
+    if (this._tapHandler) {
+      this.removeEventListener('click', this._tapHandler);
+    }
     this._tapHandler = (e) => {
       if (this.config.tap_enabled === false) return;
       e.stopPropagation();
@@ -321,7 +295,7 @@ class GladosCard extends HTMLElement {
       if (action === 'none' || action === 'default') return;
       if (action === 'more-info') {
         this.dispatchEvent(new CustomEvent('hass-more-info', { bubbles: true, composed: true, detail: { entityId: this.config.entity } }));
-      } else if (action === 'toggle' || action === 'default') {
+      } else if (action === 'toggle') {
         if (this._hass && this.config.entity) { this._hass.callService('homeassistant', 'toggle', { entity_id: this.config.entity }); }
       } else if (action === 'navigate') {
         if (this.config.navigation_path) {
@@ -338,8 +312,8 @@ class GladosCard extends HTMLElement {
         }
       }
     };
-    if (this.config.tap_enabled !== false) { el.svg.style.cursor = 'pointer'; }
-    el.svg.addEventListener('click', this._tapHandler);
+    if (this.config.tap_enabled !== false) { this.style.cursor = 'pointer'; }
+    this.addEventListener('click', this._tapHandler);
 
     const animateGlaDOS = (state, bpm) => {
       stateNow = state;
@@ -404,14 +378,17 @@ class GladosCard extends HTMLElement {
   }
   disconnectedCallback() { this._cleanupTimers(); }
 }
-
 class GladosCardEditor extends HTMLElement {
-  constructor() { super(); this.attachShadow({ mode: 'open' }); this._tapOpen = false; this._rendered = false; }
-  setConfig(config) { this._config = config; if (this._rendered) this._syncValues(); }
+  constructor() { super(); this.attachShadow({ mode: 'open' }); this._tapOpen = false; }
+  setConfig(config) { this._config = config; }
   set hass(hass) {
     this._hass = hass;
-    if (!this._rendered) { this.render(); this._rendered = true; }
-    else { this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(p => { p.hass = hass; }); }
+    const pickers = this.shadowRoot.querySelectorAll('ha-entity-picker');
+    if (pickers.length > 0) {
+      pickers.forEach(picker => { picker.hass = hass; });
+    } else {
+      this.render();
+    }
   }
   configChanged(key, value) {
     if (!this._config) return;
@@ -420,24 +397,6 @@ class GladosCardEditor extends HTMLElement {
     else newConfig[key] = value;
     this._config = newConfig;
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: newConfig }, bubbles: true, composed: true }));
-  }
-  _syncValues() {
-    const c = this._config || {};
-    const setSlider = (id, valId, val) => { const sl = this.shadowRoot.querySelector('#'+id); if (sl) sl.value = val; const v = this.shadowRoot.querySelector('#'+valId); if (v) v.innerText = val; };
-    setSlider('delay-slider', 'delay-val', c.respond_delay !== undefined ? c.respond_delay : 0);
-    setSlider('zoom-slider', 'zoom-val', c.zoom !== undefined ? c.zoom : 85);
-    setSlider('tap-speed-slider', 'tap-speed-val', c.tap_speed !== undefined ? c.tap_speed : 1.0);
-    setSlider('tap-intensity-slider', 'tap-intensity-val', c.tap_intensity !== undefined ? c.tap_intensity : 1.0);
-    setSlider('tap-bounces-slider', 'tap-bounces-val', c.tap_bounces !== undefined ? c.tap_bounces : 4);
-    const sel = this.shadowRoot.querySelector('#tap-action-select'); if (sel) sel.value = c.tap_action || 'none';
-    const npc = this.shadowRoot.querySelector('#nav-path-container'); if (npc) npc.style.display = (c.tap_action === 'navigate') ? '' : 'none';
-    const upc = this.shadowRoot.querySelector('#url-path-container'); if (upc) upc.style.display = (c.tap_action === 'url') ? '' : 'none';
-    const apc = this.shadowRoot.querySelector('#action-path-container'); if (apc) apc.style.display = (c.tap_action === 'perform-action') ? '' : 'none';
-    const bg = this.shadowRoot.querySelector('#bg-switch'); if (bg) bg.checked = c.transparent_bg === true;
-    const ts = this.shadowRoot.querySelector('#tap-switch'); if (ts) ts.checked = c.tap_enabled !== false;
-    const ep = this.shadowRoot.querySelector('#entity-picker'); if (ep) ep.value = c.entity;
-    const mp = this.shadowRoot.querySelector('#media-picker'); if (mp) mp.value = c.media_entity;
-    const bp = this.shadowRoot.querySelector('#bpm-picker'); if (bp) bp.value = c.bpm_entity;
   }
   render() {
     if (!this._config || !this._hass) return;
@@ -481,20 +440,21 @@ class GladosCardEditor extends HTMLElement {
           <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><paper-input id="url-path" label="URL" value="${c.url_path || ''}"></paper-input></div>
           <div id="action-path-container" style="display: ${tapAction === 'perform-action' ? '' : 'none'}"><paper-input id="action-path" label="Action (e.g. light.turn_on)" value="${c.action_path || ''}"></paper-input></div>
           <div class="side-by-side">
-            <div><label>Animation Speed: <span id="tap-speed-val">${c.tap_speed !== undefined ? c.tap_speed : 1.0}</span>x</label><div class="secondary">0.5 = slow, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.5" max="2" step="0.1" pin value="${c.tap_speed !== undefined ? c.tap_speed : 1.0}"></ha-slider></div>
+            <div><label>Animation Speed: <span id="tap-speed-val">${c.tap_speed !== undefined ? c.tap_speed : 0.2}</span>x</label><div class="secondary">0.05 = very slow, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.05" max="2" step="0.05" pin value="${c.tap_speed !== undefined ? c.tap_speed : 0.2}"></ha-slider></div>
             <div><label>Bop Intensity: <span id="tap-intensity-val">${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}</span>x</label><div class="secondary">How far the head pulls back.</div><ha-slider id="tap-intensity-slider" min="0.5" max="2" step="0.1" pin value="${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}"></ha-slider></div>
           </div>
-          <div><label>Rebound Bounces: <span id="tap-bounces-val">${c.tap_bounces !== undefined ? c.tap_bounces : 4}</span></label><div class="secondary">Number of times the head swings back.</div><ha-slider id="tap-bounces-slider" min="1" max="10" step="1" pin value="${c.tap_bounces !== undefined ? c.tap_bounces : 4}"></ha-slider></div>
+          <div><label>Rebound Bounces: <span id="tap-bounces-val">${c.tap_bounces !== undefined ? c.tap_bounces : 5}</span></label><div class="secondary">Full oscillation cycles before settling.</div><ha-slider id="tap-bounces-slider" min="1" max="10" step="1" pin value="${c.tap_bounces !== undefined ? c.tap_bounces : 5}"></ha-slider></div>
         </div>
       </div>
     `;
-    // Set values that can't be set via attributes
+    // Entity pickers
     const ep = this.shadowRoot.querySelector('#entity-picker'); ep.hass = this._hass; ep.value = c.entity; ep.includeDomains = ['assist_satellite'];
     ep.addEventListener('value-changed', (ev) => this.configChanged('entity', ev.detail.value));
     const mp = this.shadowRoot.querySelector('#media-picker'); mp.hass = this._hass; mp.value = c.media_entity; mp.includeDomains = ['media_player'];
     mp.addEventListener('value-changed', (ev) => this.configChanged('media_entity', ev.detail.value));
     const bp = this.shadowRoot.querySelector('#bpm-picker'); bp.hass = this._hass; bp.value = c.bpm_entity; bp.includeDomains = ['sensor'];
     bp.addEventListener('value-changed', (ev) => this.configChanged('bpm_entity', ev.detail.value));
+    // Sliders
     const delaySlider = this.shadowRoot.querySelector('#delay-slider');
     delaySlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#delay-val').innerText = ev.target.value; this.configChanged('respond_delay', Number(ev.target.value)); });
     const zoomSlider = this.shadowRoot.querySelector('#zoom-slider');
@@ -515,7 +475,6 @@ class GladosCardEditor extends HTMLElement {
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch'); tapSwitch.checked = c.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => this.configChanged('tap_enabled', ev.target.checked));
     const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
-    // Set select value after a tick to ensure items are rendered
     requestAnimationFrame(() => { tapActionSelect.value = tapAction; });
     tapActionSelect.addEventListener('value-changed', (ev) => {
       const val = ev.detail.value || ev.target.value;
