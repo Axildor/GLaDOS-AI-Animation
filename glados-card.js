@@ -8,10 +8,10 @@ class GladosCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 1.0, tap_bounces: 5, tap_intensity: 1.0, tap_action: { action: "none" } }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 0.5, tap_bounces: 5, tap_intensity: 1.0, tap_action: { action: "none" } }; }
 
   setConfig(config) {
-    // [PATCH]: Deep clone the frozen config object into mutable memory
+    // Deep clone to prevent HA immutable state violations
     this.config = JSON.parse(JSON.stringify(config));
     
     if (!this.config.entity) {
@@ -83,6 +83,7 @@ class GladosCard extends HTMLElement {
     this._bopping = false;
   }
 
+  // Double rAF Kinetic Reflow completely flushes frozen WebKit SVG timelines
   connectedCallback() {
     if (this._boundVisibility) {
       document.addEventListener('visibilitychange', this._boundVisibility);
@@ -339,16 +340,14 @@ class GladosCard extends HTMLElement {
     const TALK_MOVES = [{ r: -10, tx: -8, ty: -18, s: 1.02, dur: 1.8, lid: 0.1, px: 0, py: -2 }, { r: 4, tx: 0, ty: 16, s: 1.08, dur: 1.2, lid: 0.85, px: 0, py: 4 }, { r: 2, tx: 0, ty: 10, s: 1.04, dur: 1.0, lid: 0.5, px: 0, py: 2 }, { r: 12, tx: 10, ty: -12, s: 0.96, dur: 2.2, lid: 0.1, px: 0, py: -1 }, { r: 0, tx: 0, ty: 25, s: 1.10, dur: 1.8, lid: 0.9, px: 0, py: 5 }, { r: -6, tx: 6, ty: -22, s: 0.98, dur: 1.0, lid: 0.1, px: 0, py: -3 }, { r: 4, tx: -3, ty: 6, s: 1.03, dur: 2.0, lid: 0.4, px: 0, py: 1 }, { r: -3, tx: 0, ty: 22, s: 1.15, dur: 1.2, lid: 0.95, px: 0, py: 6 }, { r: 6, tx: 3, ty: -6, s: 1.0, dur: 1.5, lid: 0.2, px: 0, py: 0 }];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
+    // [PATCH]: Speed Vector Extrapolation.
     this.bopHead = () => {
-      const uiSpeed = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 1.0;
+      const backendSpeed = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.5;
       const bounces = Math.max(1, Math.min(20, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
       const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
-      // [PATCH]: Linear vector translation (UI 1.0 = Backend 1.2 physics math)
-      const physicsSpeed = uiSpeed * 1.2;
-
       const maxAmp = 15 * intensity;
-      const omega = 0.28 * Math.max(0.01, physicsSpeed);
+      const omega = 0.28 * Math.max(0.01, backendSpeed);
       const dampingRatio = Math.min(0.7, 0.6 / bounces);
       const damping = 2 * omega * dampingRatio;
       const stiffness = omega * omega;
@@ -428,7 +427,7 @@ class GladosCard extends HTMLElement {
       this._hitbox.removeEventListener('click', this._tapHandler);
     }
     
-    // [PATCH]: Official Native HA Lovelace action payload dispatch
+    // [PATCH]: Official Native HA Lovelace Action Payload Dispatcher
     this._tapHandler = (e) => {
       if (this.config.tap_enabled === false) return;
       e.stopPropagation();
@@ -518,21 +517,28 @@ class GladosCard extends HTMLElement {
 
 class GladosCardEditor extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
-  setConfig(config) { this._config = config; }
+  
+  setConfig(config) { 
+    this._config = JSON.parse(JSON.stringify(config)); 
+    
+    // [PATCH]: Reactive Action Editor Data Pushing
+    if (this.shadowRoot) {
+      const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
+      if (actionEditor) {
+        actionEditor.config = this._config.tap_action || { action: 'none' };
+      }
+    }
+  }
+  
   set hass(hass) {
     this._hass = hass;
-    const pickers = this.shadowRoot.querySelectorAll('ha-entity-picker');
-    if (pickers.length > 0) {
-      pickers.forEach(picker => { picker.hass = hass; });
-    }
-    
-    const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
-    if (actionEditor) {
-      actionEditor.hass = hass;
-    }
-    
-    if (pickers.length === 0 && !actionEditor) {
+    if (!this.shadowRoot.querySelector('.card-config')) {
       this.render();
+    } else {
+      const pickers = this.shadowRoot.querySelectorAll('ha-entity-picker');
+      pickers.forEach(picker => { picker.hass = hass; });
+      const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
+      if (actionEditor) { actionEditor.hass = hass; }
     }
   }
   
@@ -549,7 +555,7 @@ class GladosCardEditor extends HTMLElement {
     if (!this._config || !this._hass) return;
     const c = this._config;
     
-    // UI Speed Piecewise Matrix deployment
+    // [PATCH]: Piecewise Linear Translation Array (Backend -> UI Slider)
     const backendSpeed = c.tap_speed !== undefined ? Number(c.tap_speed) : 0.5;
     let uiValCalc = backendSpeed <= 0.5 ? (backendSpeed / 0.5) : 1.0 + ((backendSpeed - 0.5) / 1.5);
     const uiSpeed = uiValCalc.toFixed(1);
@@ -573,12 +579,10 @@ class GladosCardEditor extends HTMLElement {
         </div>
         <ha-formfield label="Transparent Background"><ha-switch id="bg-switch"></ha-switch></ha-formfield>
         
-        <!-- [PATCH]: Native HA component deployed for editor UI -->
         <ha-expansion-panel outlined header="Tap / Press Configuration">
           <div class="card-config" style="padding: 16px 0;">
             <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
             
-            <!-- [PATCH]: Native HA Action Editor Web Component -->
             <hui-action-editor id="tap-action-editor" label="Tap Action"></hui-action-editor>
             
             <div class="side-by-side">
@@ -610,7 +614,7 @@ class GladosCardEditor extends HTMLElement {
     const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
     if (actionEditor) {
       actionEditor.hass = this._hass;
-      actionEditor.config = c.tap_action;
+      actionEditor.config = c.tap_action || { action: 'none' };
       actionEditor.addEventListener('value-changed', (ev) => {
         ev.stopPropagation();
         this.configChanged('tap_action', ev.detail.value);
@@ -618,6 +622,8 @@ class GladosCardEditor extends HTMLElement {
     }
     
     const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
+    
+    // [PATCH]: Piecewise Linear Translation Array (UI Slider -> Backend Config)
     tapSpeedSlider.addEventListener('change', (ev) => { 
       const uiVal = Number(ev.target.value);
       this.shadowRoot.querySelector('#tap-speed-val').innerText = uiVal.toFixed(1); 
