@@ -84,17 +84,8 @@ class GladosCard extends HTMLElement {
     if (this._boundVisibility) {
       document.addEventListener('visibilitychange', this._boundVisibility);
     }
-    if (this.contentReady) {
-      const pivots = this.shadowRoot.querySelectorAll('#body-pivot, #head-sway-pivot');
-      pivots.forEach(p => {
-        const currentAnim = p.style.animation;
-        p.style.animation = 'none';
-        void p.offsetHeight; 
-        p.style.animation = currentAnim || '';
-      });
-      if (this._currentState) {
-        this.applyState(this._currentState, this._currentBpm);
-      }
+    if (this.contentReady && this._currentState) {
+      this.applyState(this._currentState, this._currentBpm);
     }
   }
 
@@ -341,10 +332,8 @@ class GladosCard extends HTMLElement {
       const bounces = Math.max(1, Math.min(20, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
       const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
-      const physicsSpeed = sliderSpeed * 1.2;
-
       const maxAmp = 15 * intensity;
-      const omega = 0.28 * Math.max(0.01, physicsSpeed);
+      const omega = 0.28 * Math.max(0.01, sliderSpeed);
       const dampingRatio = Math.min(0.7, 0.6 / bounces);
       const damping = 2 * omega * dampingRatio;
       const stiffness = omega * omega;
@@ -519,7 +508,14 @@ class GladosCardEditor extends HTMLElement {
     const pickers = this.shadowRoot.querySelectorAll('ha-entity-picker');
     if (pickers.length > 0) {
       pickers.forEach(picker => { picker.hass = hass; });
-    } else {
+    }
+    
+    const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
+    if (actionEditor) {
+      actionEditor.hass = hass;
+    }
+    
+    if (pickers.length === 0 && !actionEditor) {
       this.render();
     }
   }
@@ -536,9 +532,7 @@ class GladosCardEditor extends HTMLElement {
   render() {
     if (!this._config || !this._hass) return;
     const c = this._config;
-    
     const tapActionObj = typeof c.tap_action === 'object' ? c.tap_action : { action: c.tap_action || 'none' };
-    const tapAction = tapActionObj.action || 'none';
     
     // UI Speed Interpolation Matrix
     const backendSpeed = c.tap_speed !== undefined ? Number(c.tap_speed) : 0.5;
@@ -552,21 +546,6 @@ class GladosCardEditor extends HTMLElement {
         .side-by-side > div { flex: 1; display: flex; flex-direction: column; }
         label { font-family: var(--paper-font-body1_-_font-family, sans-serif); font-size: 14px; color: var(--primary-text-color); }
         .secondary { font-size: 12px; color: var(--secondary-text-color); margin-top: 2px; }
-        
-        /* [PATCH]: Inherit HA global CSS attributes for native select styling */
-        .native-select {
-          width: 100%;
-          padding: 10px;
-          border-radius: var(--ha-card-border-radius, 4px);
-          border: 1px solid var(--input-idle-line-color, rgba(120, 120, 120, 0.4));
-          background: var(--input-fill-color, var(--card-background-color, #1c1c1c));
-          color: var(--primary-text-color, #fff);
-          font-family: var(--paper-font-body1_-_font-family, sans-serif);
-          font-size: 14px;
-          margin-top: 4px;
-          outline: none;
-        }
-        .native-select:focus { border-color: var(--input-hover-line-color, var(--primary-color, #03a9f4)); }
       </style>
       <div class="card-config">
         <ha-entity-picker id="entity-picker" label="Voice Assistant Entity (Required)" allow-custom-entity></ha-entity-picker>
@@ -578,28 +557,11 @@ class GladosCardEditor extends HTMLElement {
         </div>
         <ha-formfield label="Transparent Background"><ha-switch id="bg-switch"></ha-switch></ha-formfield>
         
-        <!-- [PATCH]: Native Material Web Component expansion panel -->
         <ha-expansion-panel outlined header="Tap / Press Action">
-          <div class="card-config">
+          <div class="card-config" style="padding: 16px 0;">
             <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
             
-            <div>
-              <label class="secondary">Action Type</label>
-              <select id="tap-action-select" class="native-select">
-                <option value="none" ${tapAction === 'none' ? 'selected' : ''}>Nothing</option>
-                <option value="default" ${tapAction === 'default' ? 'selected' : ''}>Default (More Info)</option>
-                <option value="toggle" ${tapAction === 'toggle' ? 'selected' : ''}>Toggle Entity</option>
-                <option value="more-info" ${tapAction === 'more-info' ? 'selected' : ''}>More Info</option>
-                <option value="navigate" ${tapAction === 'navigate' ? 'selected' : ''}>Navigate</option>
-                <option value="url" ${tapAction === 'url' ? 'selected' : ''}>URL</option>
-                <option value="call-service" ${tapAction === 'call-service' ? 'selected' : ''}>Call Service</option>
-                <option value="assist" ${tapAction === 'assist' ? 'selected' : ''}>Assist</option>
-              </select>
-            </div>
-
-            <div id="nav-path-container" style="display: ${tapAction === 'navigate' ? '' : 'none'}"><ha-textfield id="nav-path" label="Navigation Path" value="${tapActionObj.navigation_path || ''}"></ha-textfield></div>
-            <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><ha-textfield id="url-path" label="URL" value="${tapActionObj.url_path || ''}"></ha-textfield></div>
-            <div id="action-path-container" style="display: ${tapAction === 'call-service' ? '' : 'none'}"><ha-textfield id="action-path" label="Service (e.g. light.turn_on)" value="${tapActionObj.service || ''}"></ha-textfield></div>
+            <hui-action-editor id="tap-action-editor" label="Tap Action"></hui-action-editor>
             
             <div class="side-by-side">
               <div><label>Animation Speed: <span id="tap-speed-val">${uiSpeed}</span>x</label><div class="secondary">0.1 = slow, 1.0 = normal, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.1" max="2.0" step="0.1" pin value="${uiSpeed}"></ha-slider></div>
@@ -627,24 +589,15 @@ class GladosCardEditor extends HTMLElement {
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch'); tapSwitch.checked = c.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => this.configChanged('tap_enabled', ev.target.checked));
     
-    const updateAction = (updates) => {
-      let current = typeof this._config.tap_action === 'object' ? { ...this._config.tap_action } : { action: 'none' };
-      this.configChanged('tap_action', { ...current, ...updates });
-    };
-
-    const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
-    tapActionSelect.addEventListener('change', (ev) => {
-      const val = ev.target.value;
-      updateAction({ action: val });
-      this.render(); 
-    });
-
-    const navPath = this.shadowRoot.querySelector('#nav-path');
-    if (navPath) navPath.addEventListener('change', (ev) => updateAction({ navigation_path: ev.target.value }));
-    const urlPath = this.shadowRoot.querySelector('#url-path');
-    if (urlPath) urlPath.addEventListener('change', (ev) => updateAction({ url_path: ev.target.value }));
-    const actionPath = this.shadowRoot.querySelector('#action-path');
-    if (actionPath) actionPath.addEventListener('change', (ev) => updateAction({ service: ev.target.value }));
+    const actionEditor = this.shadowRoot.querySelector('#tap-action-editor');
+    if (actionEditor) {
+      actionEditor.hass = this._hass;
+      actionEditor.config = tapActionObj;
+      actionEditor.addEventListener('value-changed', (ev) => {
+        ev.stopPropagation();
+        this.configChanged('tap_action', ev.detail.value);
+      });
+    }
     
     const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
     tapSpeedSlider.addEventListener('change', (ev) => { 
