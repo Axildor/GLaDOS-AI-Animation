@@ -7,7 +7,7 @@ class GladosCard extends HTMLElement {
     this._lastHassBpm = null;
   }
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true }; }
   setConfig(config) {
     if (!config.entity && !this.config) {
       this.config = { ...config, entity: 'assist_satellite.example' };
@@ -60,9 +60,17 @@ class GladosCard extends HTMLElement {
     if (this.pupilTimer) { clearTimeout(this.pupilTimer); this.pupilTimer = null; }
     if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
     if (this.glitchRaf) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; }
+    if (this._bopTimer1) { clearTimeout(this._bopTimer1); this._bopTimer1 = null; }
+    if (this._bopTimer2) { clearTimeout(this._bopTimer2); this._bopTimer2 = null; }
+    if (this._bopTimer3) { clearTimeout(this._bopTimer3); this._bopTimer3 = null; }
+    if (this._bopLedTimer) { clearTimeout(this._bopLedTimer); this._bopLedTimer = null; }
     if (this._boundVisibility) {
       document.removeEventListener('visibilitychange', this._boundVisibility);
       this._boundVisibility = null;
+    }
+    if (this._tapHandler && this._svg) {
+      this._svg.removeEventListener('click', this._tapHandler);
+      this._tapHandler = null;
     }
   }
   setupDOM() {
@@ -78,20 +86,21 @@ class GladosCard extends HTMLElement {
         #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; --led-color: #ffb800; --led-opacity: 0.15; }
         .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: fill 0.2s, opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
 
-        /* GPU LAYER STRATEGY: Only 3 compositor-promoted elements.
-           #body-pivot and #head-sway-pivot run CSS ambient animations.
-           #torso is the JS-driven swivel target (decoupled from #body-pivot
-           so setBodySwivel never destroys the CSS body-sway animation). */
-        #body-pivot, #head-sway-pivot, #torso { will-change: transform; }
+        /* GPU LAYER STRATEGY: Only promote the two CSS-animated pivots.
+           #torso-swivel handles JS body swivel — no will-change needed
+           since it's inside #body-pivot's compositor layer. */
+        #body-pivot, #head-sway-pivot { will-change: transform; }
 
         #body-pivot { transform-origin: 140px 116px; animation: body-sway 8s ease-in-out infinite; }
         @keyframes body-sway { 0%, 100% { transform: rotate(-1.4deg); } 50% { transform: rotate( 1.4deg); } }
         #head-sway-pivot { transform-origin: 140px 285px; animation: head-ambient-sway 13s ease-in-out infinite; }
         @keyframes head-ambient-sway { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
 
-        /* DECOUPLED JS TARGET: #torso handles JS swivel independently.
-           #body-pivot's CSS animation is never touched by JS. */
-        #torso { transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); transform-origin: 140px 116px; }
+        /* DECOUPLED JS SWIVEL: #torso-swivel is a clean wrapper with no SVG
+           transform attribute. CSS transforms work natively on it without
+           fighting SVG's transform attribute or transform-box quirks.
+           #torso below retains its original SVG transform untouched. */
+        #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
 
         #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
         #eye-halo, #eye-center { transition: fill 0.8s ease-in-out; }
@@ -392,53 +401,55 @@ class GladosCard extends HTMLElement {
             </meshgradient>
           </defs>
           <g id="body-pivot">
-            <g id="torso" transform="matrix(1.2,0,0,1.2,-28,-23.2)">
-              <ellipse cx="140" cy="116" rx="55" ry="15" fill="#1c1c26" stroke="#0c0c12" stroke-width="1.2"/>
-              <ellipse cx="140" cy="116" rx="46" ry="11" fill="#141420" stroke="#1e1e2c" stroke-width="0.7"/>
+            <g id="torso-swivel">
+              <g id="torso" transform="matrix(1.2,0,0,1.2,-28,-23.2)">
+                <ellipse cx="140" cy="116" rx="55" ry="15" fill="#1c1c26" stroke="#0c0c12" stroke-width="1.2"/>
+                <ellipse cx="140" cy="116" rx="46" ry="11" fill="#141420" stroke="#1e1e2c" stroke-width="0.7"/>
 
-              <path d="m 94,126 -8,8 -2,66 q 0,10 10,12 h 92 q 10,-2 10,-12 l -2,-66 -8,-8 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1.4"/>
-              <path d="m 90,132 -28,8 -4,40 4,16 12,4 16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
-              <path d="m 90,136 -24,7 -4,35 4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
+                <path d="m 94,126 -8,8 -2,66 q 0,10 10,12 h 92 q 10,-2 10,-12 l -2,-66 -8,-8 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1.4"/>
+                <path d="m 90,132 -28,8 -4,40 4,16 12,4 16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
+                <path d="m 90,136 -24,7 -4,35 4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
 
-              <circle cx="60" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
-              <circle cx="60" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
-              <path d="m 90,132 c -4,20 -6,40 -4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
+                <circle cx="60" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
+                <circle cx="60" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
+                <path d="m 90,132 c -4,20 -6,40 -4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
 
-              <path d="m 190,132 28,8 4,40 -4,16 -12,4 -16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
-              <path d="m 190,136 24,7 4,35 -4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
+                <path d="m 190,132 28,8 4,40 -4,16 -12,4 -16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
+                <path d="m 190,136 24,7 4,35 -4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
 
-              <circle cx="220" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
-              <circle cx="220" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
-              <path d="m 190,132 c 4,20 6,40 4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
+                <circle cx="220" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
+                <circle cx="220" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
+                <path d="m 190,132 c 4,20 6,40 4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
 
-              <line x1="90" y1="152" x2="190" y2="152" stroke="#6a6d75" stroke-width="1"/>
-              <line x1="89" y1="174" x2="191" y2="174" stroke="#6a6d75" stroke-width="1"/>
-              <line x1="140" y1="128" x2="140" y2="210" stroke="#6a6d75" stroke-width="1"/>
+                <line x1="90" y1="152" x2="190" y2="152" stroke="#6a6d75" stroke-width="1"/>
+                <line x1="89" y1="174" x2="191" y2="174" stroke="#6a6d75" stroke-width="1"/>
+                <line x1="140" y1="128" x2="140" y2="210" stroke="#6a6d75" stroke-width="1"/>
 
-              <rect x="94" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
-              <rect x="96" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
-              <g id="led-matrix-left" class="led-matrix" filter="url(#ledGlow)">
-                <rect class="led-dot" x="98" y="140" width="28" height="2" rx="1"/>
-                <rect class="led-dot" x="98" y="145" width="28" height="2" rx="1"/>
-                <rect class="led-dot" x="98" y="150" width="28" height="2" rx="1"/>
+                <rect x="94" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
+                <rect x="96" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
+                <g id="led-matrix-left" class="led-matrix" filter="url(#ledGlow)">
+                  <rect class="led-dot" x="98" y="140" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="98" y="145" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="98" y="150" width="28" height="2" rx="1"/>
+                </g>
+
+                <rect x="150" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
+                <rect x="152" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
+                <g id="led-matrix-right" class="led-matrix" filter="url(#ledGlow)">
+                  <rect class="led-dot" x="154" y="140" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="154" y="145" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="154" y="150" width="28" height="2" rx="1"/>
+                </g>
+
+                <circle cx="100" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-l1" cx="100" cy="180" r="1.5"/>
+                <circle cx="108" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-l2" cx="108" cy="180" r="1.5"/>
+                <circle cx="172" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-r1" cx="172" cy="180" r="1.5"/>
+                <circle cx="180" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-r2" cx="180" cy="180" r="1.5"/>
               </g>
-
-              <rect x="150" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
-              <rect x="152" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
-              <g id="led-matrix-right" class="led-matrix" filter="url(#ledGlow)">
-                <rect class="led-dot" x="154" y="140" width="28" height="2" rx="1"/>
-                <rect class="led-dot" x="154" y="145" width="28" height="2" rx="1"/>
-                <rect class="led-dot" x="154" y="150" width="28" height="2" rx="1"/>
-              </g>
-
-              <circle cx="100" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
-              <circle id="ind-l1" cx="100" cy="180" r="1.5"/>
-              <circle cx="108" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
-              <circle id="ind-l2" cx="108" cy="180" r="1.5"/>
-              <circle cx="172" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
-              <circle id="ind-r1" cx="172" cy="180" r="1.5"/>
-              <circle cx="180" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
-              <circle id="ind-r2" cx="180" cy="180" r="1.5"/>
             </g>
           </g>
           <g id="glados-head-wrapper" transform="translate(0, -65)">
@@ -599,7 +610,7 @@ class GladosCard extends HTMLElement {
     const el = {
       svg: root.getElementById('glados-svg'),
       head: root.getElementById('glados-head'),
-      torso: root.getElementById('torso'),
+      torsoSwivel: root.getElementById('torso-swivel'),
       eyeLayerIdle: root.getElementById('eye-layer-idle'),
       eyeLayerListen: root.getElementById('eye-layer-listen'),
       eyeLayerProcess: root.getElementById('eye-layer-process'),
@@ -615,19 +626,24 @@ class GladosCard extends HTMLElement {
       dangerRing: root.getElementById('danger-ring'),
       ledMatrices: root.querySelectorAll('.led-matrix')
     };
+    this._svg = el.svg;
+
     let stateNow = 'idle';
     let currentBaseLid = 0;
+    let currentLedColor = '#ffb800';
+    let currentLedOpacity = '0.15';
+
     function setHead(rot, tx, ty, scale = 1.0, dur, ease = "cubic-bezier(0.34,1.06,0.64,1)") {
       el.head.style.transition = `transform ${dur}s ${ease}`;
       el.head.style.transform = `translate3d(${tx}px,${ty}px,0) rotate(${rot}deg) scale(${scale})`;
     }
     function setBodySwivel(rot, sx, dur) {
-      el.torso.style.transition = `transform ${dur || 2.0}s cubic-bezier(0.45,0.05,0.55,0.95)`;
-      el.torso.style.transform = `matrix(1.2,0,0,1.2,-28,-23.2) rotate(${rot}deg) scaleX(${sx || 1})`;
+      el.torsoSwivel.style.transition = `transform ${dur || 2.0}s cubic-bezier(0.45,0.05,0.55,0.95)`;
+      el.torsoSwivel.style.transform = `rotate(${rot}deg) scaleX(${sx || 1})`;
     }
     function resetBodySwivel() {
-      el.torso.style.transition = `transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95)`;
-      el.torso.style.transform = `matrix(1.2,0,0,1.2,-28,-23.2)`;
+      el.torsoSwivel.style.transition = `transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95)`;
+      el.torsoSwivel.style.transform = '';
     }
     function setLid(amount, dur = 0.7) {
       const px = amount * 17;
@@ -647,6 +663,8 @@ class GladosCard extends HTMLElement {
       el.bellows.style.transform = `translate3d(0, ${ey}px, 0)`;
     }
     function setLEDs(color, opacity) {
+      currentLedColor = color;
+      currentLedOpacity = opacity;
       el.svg.style.setProperty('--led-color', color);
       el.svg.style.setProperty('--led-opacity', opacity);
     }
@@ -658,6 +676,12 @@ class GladosCard extends HTMLElement {
     this.danceLedTimer = null;
     this.talkAnim = null;
     this.respondTimer = null;
+    this._bopTimer1 = null;
+    this._bopTimer2 = null;
+    this._bopTimer3 = null;
+    this._bopLedTimer = null;
+    this._bopping = false;
+
     const startLidBehavior = () => {
       if (this.lidTimer) clearTimeout(this.lidTimer);
       const loop = () => {
@@ -863,12 +887,72 @@ class GladosCard extends HTMLElement {
       };
       step();
     };
+
+    // ── BOP ANIMATION ──
+    // Simulates tapping a free-hanging head: snaps back (smaller),
+    // springs forward past neutral (overshoot), then settles.
+    // LED vent lights pulse bright on impact, fade back on settle.
+    this.bopHead = () => {
+      if (this._bopping) return;
+      this._bopping = true;
+
+      // Suppress idle behaviors during bop so they don't fight the animation
+      this.stopIdleCycle();
+      stopLidBehavior();
+
+      // Phase 1: Quick snap backward (0.13s) — head recoils, shrinks
+      setHead(-4, 0, -20, 0.86, 0.13, "ease-out");
+      setLEDs(currentLedColor, '1');   // Full brightness pulse
+      setLid(0.15, 0.13);
+
+      // Phase 2: Spring forward past neutral with overshoot (0.5s)
+      this._bopTimer1 = setTimeout(() => {
+        setHead(6, 0, 10, 1.05, 0.45, "cubic-bezier(0.34, 1.56, 0.64, 1)");
+        setLid(0, 0.45);
+      }, 130);
+
+      // Phase 3: Settle back to neutral with slight wobble (0.6s)
+      this._bopTimer2 = setTimeout(() => {
+        setHead(-2, 0, -3, 0.99, 0.5, "cubic-bezier(0.34, 1.56, 0.64, 1)");
+      }, 580);
+
+      // Phase 4: Final settle + restore LEDs (0.5s)
+      this._bopTimer3 = setTimeout(() => {
+        setHead(0, 0, 0, 1.0, 0.5, "ease-in-out");
+        setLEDs(currentLedColor, currentLedOpacity);  // Restore normal brightness
+      }, 1080);
+
+      // Phase 5: Resume idle behavior (after settle completes)
+      this._bopLedTimer = setTimeout(() => {
+        this._bopping = false;
+        if (stateNow === 'idle') {
+          startLidBehavior();
+          this.startIdleCycle();
+        }
+      }, 1580);
+    };
+
+    // ── TAP HANDLER ──
+    if (this._tapHandler && this._svg) {
+      this._svg.removeEventListener('click', this._tapHandler);
+    }
+    this._tapHandler = (e) => {
+      if (this.config.tap_enabled === false) return;
+      e.stopPropagation();
+      this.bopHead();
+    };
+    if (this.config.tap_enabled !== false) {
+      el.svg.style.cursor = 'pointer';
+    }
+    el.svg.addEventListener('click', this._tapHandler);
+
     const animateGlaDOS = (state, bpm) => {
       stateNow = state;
       if (this.talkAnim) clearTimeout(this.talkAnim);
       stopLidBehavior();
       this.stopIdleCycle();
       this.stopDanceCycle();
+      this._bopping = false;
       el.ledMatrices.forEach(m => m.classList.remove('pulsing'));
       if (el.dangerRing) el.dangerRing.setAttribute('opacity', '0');
       el.eyeLayerIdle.style.opacity = '0';
@@ -965,9 +1049,6 @@ class GladosCard extends HTMLElement {
     };
 
     // ── Visibility handler: pause on hidden, resume on visible ──
-    // CRITICAL: Do NOT call _cleanupTimers() here — that would remove
-    // this very event listener, making the resume branch unreachable.
-    // Only stop specific animation timers; keep the listener alive.
     this._visibilityHandler = () => {
       if (document.hidden) {
         this.stopIdleCycle();
@@ -975,6 +1056,11 @@ class GladosCard extends HTMLElement {
         if (this.lidTimer) { clearTimeout(this.lidTimer); this.lidTimer = null; }
         if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
         if (this.respondTimer) { clearTimeout(this.respondTimer); this.respondTimer = null; }
+        if (this._bopTimer1) { clearTimeout(this._bopTimer1); this._bopTimer1 = null; }
+        if (this._bopTimer2) { clearTimeout(this._bopTimer2); this._bopTimer2 = null; }
+        if (this._bopTimer3) { clearTimeout(this._bopTimer3); this._bopTimer3 = null; }
+        if (this._bopLedTimer) { clearTimeout(this._bopLedTimer); this._bopLedTimer = null; }
+        this._bopping = false;
         el.svg.style.animationPlayState = 'paused';
         const animatedEls = el.svg.querySelectorAll('#body-pivot, #head-sway-pivot');
         animatedEls.forEach(e => { e.style.animationPlayState = 'paused'; });
@@ -1100,6 +1186,9 @@ class GladosCardEditor extends HTMLElement {
         <ha-formfield label="Transparent Background">
           <ha-switch id="bg-switch"></ha-switch>
         </ha-formfield>
+        <ha-formfield label="Enable Tap to Bop">
+          <ha-switch id="tap-switch"></ha-switch>
+        </ha-formfield>
       </div>
     `;
     const entityPicker = this.shadowRoot.querySelector('#entity-picker');
@@ -1133,6 +1222,11 @@ class GladosCardEditor extends HTMLElement {
     bgSwitch.checked = this._config.transparent_bg === true;
     bgSwitch.addEventListener('change', (ev) => {
       this.configChanged('transparent_bg', ev.target.checked);
+    });
+    const tapSwitch = this.shadowRoot.querySelector('#tap-switch');
+    tapSwitch.checked = this._config.tap_enabled !== false;
+    tapSwitch.addEventListener('change', (ev) => {
+      this.configChanged('tap_enabled', ev.target.checked);
     });
   }
 }
