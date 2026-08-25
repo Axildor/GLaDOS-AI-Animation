@@ -8,7 +8,7 @@ class GladosCard extends HTMLElement {
   }
 
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 0.1, tap_bounces: 5, tap_intensity: 1.0, tap_action: "none" }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 1.0, tap_bounces: 5, tap_intensity: 1.0, tap_action: { action: "none" } }; }
 
   setConfig(config) {
     if (!config.entity && !this.config) {
@@ -74,9 +74,22 @@ class GladosCard extends HTMLElement {
     this._bopping = false;
   }
 
+  // [PATCH]: Kinetic Reflow - Force CSS animation timeline restart after DOM insertion
   connectedCallback() {
-    if (this.contentReady && this._currentState) {
-      this.applyState(this._currentState, this._currentBpm);
+    if (this._boundVisibility) {
+      document.addEventListener('visibilitychange', this._boundVisibility);
+    }
+    if (this.contentReady) {
+      const pivots = this.shadowRoot.querySelectorAll('#body-pivot, #head-sway-pivot');
+      pivots.forEach(p => {
+        const currentAnim = p.style.animation;
+        p.style.animation = 'none';
+        void p.offsetHeight; 
+        p.style.animation = currentAnim || '';
+      });
+      if (this._currentState) {
+        this.applyState(this._currentState, this._currentBpm);
+      }
     }
   }
 
@@ -84,11 +97,6 @@ class GladosCard extends HTMLElement {
     this._cleanupTimers(); 
     if (this._boundVisibility) {
       document.removeEventListener('visibilitychange', this._boundVisibility);
-      this._boundVisibility = null;
-    }
-    if (this._tapHandler && this._hitbox) {
-      this._hitbox.removeEventListener('click', this._tapHandler);
-      this._tapHandler = null;
     }
   }
 
@@ -103,7 +111,6 @@ class GladosCard extends HTMLElement {
         :host { display: flex; align-items: center; justify-content: center; ${bgStyle} border-radius: var(--ha-card-border-radius, 12px); overflow: hidden; width: 100%; }
         #scene { position: relative; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; }
         
-        /* [PATCH]: Intercept clicks via an absolute overlay to prevent HA shadow DOM from swallowing SVG events */
         #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
         #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; --led-color: #ffb800; --led-opacity: 0.15; }
         
@@ -153,8 +160,6 @@ class GladosCard extends HTMLElement {
             <meshgradient id="meshgradient125" gradientUnits="userSpaceOnUse" x="72.6" y="232">
               <meshrow><meshpatch><stop path="c 4.62124,0 9.24247,0 13.8637,0" style="stop-color:#fafafa;stop-opacity:1"/><stop path="c -0.0372484,9.53147 -0.589635,18.9441 -1.15999,28.3526" style="stop-color:#fafafa;stop-opacity:1"/><stop path="c -4.35666,0.0610757 -8.07605,0.269212 -12.7036,0.267753" style="stop-color:#aeaeae;stop-opacity:1"/><stop path="c -1.03361e-05,-9.54009 -3.03118e-05,-19.0802 -6.8917e-05,-28.6203" style="stop-color:#aeaeae;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.810267,0 1.62053,0 2.4308,0"/><stop path="c -6.05e-06,9.54005 -0.605469,18.9404 -1.23204,28.3359" style="stop-color:#cdcdcd;stop-opacity:1"/><stop path="c -0.811394,-0.00026 -1.59486,0.00592 -2.35874,0.01664" style="stop-color:#c6c6c6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 5.46826,0 10.9365,0 16.4048,0"/><stop path="c 0,9.54005 0,19.0801 0,28.6202" style="stop-color:#cdcdcd;stop-opacity:1"/><stop path="c -5.46075,0.00173 -12.1761,-0.28606 -17.6368,-0.28431" style="stop-color:#c6c6c6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 11.1251,0 22.2503,0 33.3755,0"/><stop path="c 0,9.54005 0,19.0801 0,28.6202" style="stop-color:#cdcdcd;stop-opacity:1"/><stop path="c -11.1252,-7.42e-06 -22.2504,-1.48e-05 -33.3755,0" style="stop-color:#c6c6c6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 12.2565,0 24.513,0 36.7695,0"/><stop path="c 0,9.54005 0,19.0801 0,28.6202" style="stop-color:#cdcdcd;stop-opacity:1"/><stop path="c -12.2565,-3.48e-06 -24.513,4.32e-07 -36.7695,0" style="stop-color:#c6c6c6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 5.18545,0 10.3709,0 15.5564,0"/><stop path="c 0,9.54005 0.51231,19.0801 1.04249,28.6202" style="stop-color:#cdcdcd;stop-opacity:1"/><stop path="c -5.17909,-8.78e-07 -11.4198,1.44e-06 -16.5989,0" style="stop-color:#c6c6c6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.715253,0 1.43051,0 2.14576,0"/><stop path="c 0.02971,9.54005 0.504699,19.0801 0.995215,28.6202" style="stop-color:#e8e8e8;stop-opacity:1"/><stop path="c -0.68449,7.21e-07 -1.3824,1.63e-06 -2.09849,0" style="stop-color:#f1f1f1;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 4.7512,0 9.50239,0 14.2535,0"/><stop path="c 0,9.5401 0,19.0802 0,28.6203" style="stop-color:#fbfbfb;stop-opacity:1"/><stop path="c -4.7567,-2.88e-05 -8.71145,-5.75e-05 -13.2583,-7.49e-05" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch></meshrow>
               <meshrow><meshpatch><stop path="c -0.611566,10.0884 -1.24379,20.172 -1.28373,30.3922"/><stop path="c -4.05968,0.129582 -6.79877,0.563913 -11.4199,0.563906" style="stop-color:#5d5d5d;stop-opacity:1"/><stop path="c 0,-10.2294 0,-20.4589 -1.1e-05,-30.6884" style="stop-color:#5d5d5d;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -0.671855,10.0744 -1.36798,20.1433 -1.368,30.3728"/><stop path="c -0.810267,-1.12e-06 -1.56267,0.01335 -2.27448,0.0361" style="stop-color:#a3a3a3;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,10.2295 0,20.459 0,30.6885"/><stop path="c -5.46829,-7.55e-06 -13.5366,-0.60001 -19.0048,-0.6" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,10.2295 0,20.459 0,30.6885"/><stop path="c -11.1252,-1.53e-05 -22.2503,-3.07e-05 -33.3755,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,10.2295 0,20.459 0,30.6885"/><stop path="c -12.2565,-7.23e-06 -24.513,8.96e-07 -36.7695,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.568487,10.2295 1.15751,20.459 1.15751,30.6885"/><stop path="c -5.18545,-1.81e-06 -12.5709,3e-06 -17.7564,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.525962,10.2295 1.06978,20.459 1.10164,30.6885"/><stop path="c -0.649776,1.49e-06 -1.32736,3.39e-06 -2.04261,0" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,10.2295 0,20.459 0,30.6884"/><stop path="c -4.7512,-7.97e-06 -7.84044,-1.56e-05 -12.1567,0" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch></meshrow>
-              <meshrow><meshpatch><stop path="c -0.014335,9.16529 -0.226812,18.608 -0.446185,28.0604"/><stop path="c -3.95792,-0.012905 -6.35012,-0.06422 -10.9737,-0.06079" style="stop-color:#565656;stop-opacity:1"/><stop path="c -2.84e-06,-9.14524 -8.33e-06,-18.2905 -1.5e-05,-27.4357" style="stop-color:#565656;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -1.05e-05,9.14522 -0.232903,18.6165 -0.473903,28.0991"/><stop path="c -0.8107,0.000616 -1.5528,-0.00045 -2.24676,-0.0026" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.14522 0,18.2905 0,27.4357"/><stop path="c -5.4654,-0.00406 -14.0134,0.06748 -19.4787,0.0634" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.14522 0,18.2905 0,27.4357"/><stop path="c -11.1252,-1.97e-05 -22.2503,-3.94e-05 -33.3755,0" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.14522 0,18.2905 0,27.4357"/><stop path="c -12.2565,-6.13e-06 -24.513,7.6e-07 -36.7695,0" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 3.03e-08,9.14522 0.279468,18.3836 0.568669,27.6253"/><stop path="c -5.18197,0.00115 -13.143,-0.19071 -18.3251,-0.1896" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.016208,9.15062 0.275318,18.3822 0.542886,27.6167"/><stop path="c -0.632997,0.00558 -1.30112,0.00872 -2.01683,0.0086" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.14522 0,18.2905 0,27.4357"/><stop path="c -4.75422,-0.001 -7.40902,0.14382 -11.6138,0.181" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch></meshrow>
-              <meshrow><meshpatch><stop path="c -0.235205,10.1345 -0.478338,20.2801 -0.493693,30.1067"/><stop path="c -3.84371,-0.17279 -5.8589,-0.75191 -10.48,-0.75193" style="stop-color:#505050;stop-opacity:1"/><stop path="c 0,-9.80518 0,-19.6104 0,-29.4156" style="stop-color:#505050;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -0.258391,10.167 -0.526101,20.347 -0.526095,30.1522"/><stop path="c -0.810269,-1.76e-06 -1.54042,-0.0178 -2.21436,-0.0481" style="stop-color:#a3a3a3;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.80521 0,19.6104 0,29.4156"/><stop path="c -5.46829,-1.2e-05 -14.5366,0.79998 -20.0048,0.8" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.80521 0,19.6104 0,29.4156"/><stop path="c -11.1252,-2.44e-05 -22.2503,-4.88e-05 -33.3755,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.80521 0,19.6104 0,29.4156"/><stop path="c -12.2565,-4.96e-06 -24.513,6.1e-07 -36.7695,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.310071,9.90857 0.631331,19.8209 0.631331,29.626"/><stop path="c -5.18545,-1.2e-06 -13.7709,-0.39999 -18.9564,-0.4" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0.286878,9.90083 0.583479,19.8049 0.600854,29.6158"/><stop path="c -0.614063,0.0119 -1.2711,0.01875 -1.98635,0.0188" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,9.80521 0,19.6104 0,29.4156"/><stop path="c -4.7512,-5.47e-06 -6.93393,0.30216 -11.0129,0.3812" style="stop-color:#fbfbfb;stop-opacity:1"/></meshpatch></meshrow>
               <meshrow><meshpatch><stop path="c 0.041532,20.4293 1.27426,40.0078 1.31583,60.437"/><stop path="c -4.14608,0.04318 -7.17473,0.18796 -11.7959,0.18795" style="stop-color:#383838;stop-opacity:1"/><stop path="c 0,-20.459 0,-40.918 0,-61.3769" style="stop-color:#383838;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -3.1e-05,20.459 1.39999,39.918 1.4,60.3769"/><stop path="c -0.810269,-1.18e-06 -1.57158,0.00444 -2.29853,0.012" style="stop-color:#a3a3a3;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,20.459 0,40.918 0,61.3769"/><stop path="c -5.46829,-7.97e-06 -13.1366,-0.20001 -18.6048,-0.2" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,20.459 0,40.918 0,61.3769"/><stop path="c -11.1252,-1.62e-05 -22.2503,-3.24e-05 -33.3755,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,20.459 0,40.918 0,61.3769"/><stop path="c -12.2565,-4.37e-07 -24.513,5.4e-08 -36.7695,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,20.459 -0.2,40.518 -0.2,60.9769"/><stop path="c -5.18545,-1.1e-07 -13.5709,1.73e-07 -18.7564,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -0.00559,20.4478 -0.185026,40.5479 -0.190624,60.9957"/><stop path="c -0.620016,9.2e-08 -1.28048,2e-07 -1.99573,0" style="stop-color:#ffffff;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,20.459 0,40.9179 0,61.3769"/><stop path="c -4.7512,-4.83e-07 -7.08501,-9.66e-07 -11.2035,0" style="stop-color:#eeeeee;stop-opacity:1"/></meshpatch></meshrow>
               <meshrow><meshpatch><stop path="c 0.06526,23.1603 2.00241,46.4908 2.06774,69.6511"/><stop path="c -4.62124,0 -9.24246,0 -13.8637,0" style="stop-color:#4c4c4c;stop-opacity:1"/><stop path="c 0,-23.1544 0,-46.3088 0,-69.4631" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -3.79e-05,23.1544 2.19999,46.5088 2.20001,69.6631"/><stop path="c -0.810269,0 -1.62054,0 -2.4308,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 1.23e-05,23.1544 2.47e-05,46.3088 3.71e-05,69.4631"/><stop path="c -5.46829,0 -10.9366,0 -16.4049,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -11.1251,0 -22.2503,0 -33.3755,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -12.2565,0 -24.513,0 -36.7695,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 -3.2,46.3088 -3.2,69.4631"/><stop path="c -5.18545,0 -10.3709,0 -15.5564,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -0.08956,23.1544 -2.96042,46.3088 -3.04998,69.4631"/><stop path="c -0.715248,0 -1.4305,0 -2.14575,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -4.7512,0 -9.50239,0 -14.2535,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch></meshrow>
             </meshgradient>
@@ -339,21 +344,22 @@ class GladosCard extends HTMLElement {
     const TALK_MOVES = [{ r: -10, tx: -8, ty: -18, s: 1.02, dur: 1.8, lid: 0.1, px: 0, py: -2 }, { r: 4, tx: 0, ty: 16, s: 1.08, dur: 1.2, lid: 0.85, px: 0, py: 4 }, { r: 2, tx: 0, ty: 10, s: 1.04, dur: 1.0, lid: 0.5, px: 0, py: 2 }, { r: 12, tx: 10, ty: -12, s: 0.96, dur: 2.2, lid: 0.1, px: 0, py: -1 }, { r: 0, tx: 0, ty: 25, s: 1.10, dur: 1.8, lid: 0.9, px: 0, py: 5 }, { r: -6, tx: 6, ty: -22, s: 0.98, dur: 1.0, lid: 0.1, px: 0, py: -3 }, { r: 4, tx: -3, ty: 6, s: 1.03, dur: 2.0, lid: 0.4, px: 0, py: 1 }, { r: -3, tx: 0, ty: 22, s: 1.15, dur: 1.2, lid: 0.95, px: 0, py: 6 }, { r: 6, tx: 3, ty: -6, s: 1.0, dur: 1.5, lid: 0.2, px: 0, py: 0 }];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
-    // [PATCH]: Fixed Timestep Accumulator deployed for cross-device speed equality
     this.bopHead = () => {
-      const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.1;
+      const sliderSpeed = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 1.0;
       const bounces = Math.max(1, Math.min(20, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
       const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
+      // [PATCH]: Direct UI -> Physics Translation
+      const physicsSpeed = sliderSpeed * 1.2;
+
       const maxAmp = 15 * intensity;
-      const omega = 0.28 * speedMul;
+      const omega = 0.28 * Math.max(0.01, physicsSpeed);
       const dampingRatio = Math.min(0.7, 0.6 / bounces);
       const damping = 2 * omega * dampingRatio;
       const stiffness = omega * omega;
       const initialVelocity = maxAmp * omega * 1.8;
 
       if (this._bopping) {
-        // Kinetic Re-Injection: Add energy if clicked while moving
         this._bopVelocity = initialVelocity;
         return;
       }
@@ -371,7 +377,7 @@ class GladosCard extends HTMLElement {
       
       let lastTime = performance.now();
       let accumulator = 0;
-      const TIME_STEP = 16.666; // Strict 60Hz physics math
+      const TIME_STEP = 16.666; 
       let lastLedUpdate = 0;
 
       if (this._bopRaf) cancelAnimationFrame(this._bopRaf);
@@ -381,7 +387,7 @@ class GladosCard extends HTMLElement {
 
         let frameTime = now - lastTime;
         lastTime = now;
-        if (frameTime > 100) frameTime = 16.666; // Prevent lag spike spiral
+        if (frameTime > 100) frameTime = 16.666; 
         
         accumulator += frameTime;
 
@@ -427,6 +433,7 @@ class GladosCard extends HTMLElement {
       this._hitbox.removeEventListener('click', this._tapHandler);
     }
     
+    // [PATCH]: Format official HA action payload envelope
     this._tapHandler = (e) => {
       if (this.config.tap_enabled === false) return;
       e.stopPropagation();
@@ -434,29 +441,20 @@ class GladosCard extends HTMLElement {
       
       this.bopHead();
       
-      const action = this.config.tap_action || 'none';
-      if (action === 'none' || action === 'default') return;
-      if (action === 'more-info') {
-        this.dispatchEvent(new CustomEvent('hass-more-info', { bubbles: true, composed: true, detail: { entityId: this.config.entity } }));
-      } else if (action === 'toggle') {
-        if (this._hass && this.config.entity) { this._hass.callService('homeassistant', 'toggle', { entity_id: this.config.entity }); }
-      } else if (action === 'navigate') {
-        if (this.config.navigation_path) {
-          this.dispatchEvent(new CustomEvent('hass-navigate', { bubbles: true, composed: true, detail: { path: this.config.navigation_path } }));
-        }
-      } else if (action === 'url') {
-        if (this.config.url_path) { window.open(this.config.url_path, '_blank'); }
-      } else if (action === 'assist') {
-        this.dispatchEvent(new CustomEvent('hass-voice-assist', { bubbles: true, composed: true }));
-      } else if (action === 'perform-action') {
-        if (this._hass && this.config.action_path) {
-          const parts = this.config.action_path.split('.');
-          if (parts.length === 2) { this._hass.callService(parts[0], parts[1], {}); }
-        }
-      }
+      const actionObj = typeof this.config.tap_action === 'object' ? this.config.tap_action : { action: this.config.tap_action || 'none' };
+      if (actionObj.action === 'none') return;
+      
+      const ev = new Event('hass-action', { bubbles: true, composed: true });
+      ev.detail = { 
+        config: {
+          entity: this.config.entity,
+          tap_action: actionObj
+        }, 
+        action: 'tap' 
+      };
+      this.dispatchEvent(ev);
     };
     
-    // [PATCH]: Bind click strictly to invisible overlay instead of root element
     if (this.config.tap_enabled !== false) { el.hitbox.style.display = 'block'; }
     el.hitbox.addEventListener('click', this._tapHandler);
 
@@ -551,11 +549,11 @@ class GladosCardEditor extends HTMLElement {
   render() {
     if (!this._config || !this._hass) return;
     const c = this._config;
-    const tapAction = c.tap_action || 'none';
     
-    const backendSpeed = c.tap_speed !== undefined ? c.tap_speed : 0.1;
-    let uiValCalc = backendSpeed <= 0.1 ? backendSpeed * 10 : (backendSpeed + 1.8) / 1.9;
-    const uiSpeed = uiValCalc.toFixed(1);
+    // [PATCH]: Format conversion for legacy string states
+    const tapActionObj = typeof c.tap_action === 'object' ? c.tap_action : { action: c.tap_action || 'none' };
+    const tapAction = tapActionObj.action || 'none';
+    const uiSpeed = c.tap_speed !== undefined ? c.tap_speed : 1.0;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -568,6 +566,19 @@ class GladosCardEditor extends HTMLElement {
         .tap-chevron { display: inline-block; transition: transform 0.2s; font-size: 12px; }
         .tap-content { display: none; padding-top: 8px; }
         .tap-content.open { display: flex; flex-direction: column; gap: 16px; }
+        .native-select {
+          width: 100%;
+          padding: 10px;
+          border-radius: 4px;
+          border: 1px solid var(--divider-color, rgba(120, 120, 120, 0.4));
+          background: var(--card-background-color, #1c1c1c);
+          color: var(--primary-text-color, #fff);
+          font-family: var(--paper-font-body1_-_font-family, sans-serif);
+          font-size: 14px;
+          margin-top: 4px;
+          outline: none;
+        }
+        .native-select:focus { border-color: var(--primary-color, #03a9f4); }
       </style>
       <div class="card-config">
         <ha-entity-picker id="entity-picker" label="Voice Assistant Entity (Required)" allow-custom-entity></ha-entity-picker>
@@ -581,21 +592,26 @@ class GladosCardEditor extends HTMLElement {
         <div class="tap-header" id="tap-header"><span class="tap-chevron" id="tap-chevron">▶</span> Tap / Press</div>
         <div class="tap-content" id="tap-content">
           <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
-          <ha-select outlined label="Tap Action" id="tap-action-select" naturalMenuWidth>
-            <mwc-list-item value="default">Default (Toggle)</mwc-list-item>
-            <mwc-list-item value="more-info">More Info</mwc-list-item>
-            <mwc-list-item value="toggle">Toggle</mwc-list-item>
-            <mwc-list-item value="navigate">Navigate</mwc-list-item>
-            <mwc-list-item value="url">URL</mwc-list-item>
-            <mwc-list-item value="perform-action">Perform Action</mwc-list-item>
-            <mwc-list-item value="assist">Assist</mwc-list-item>
-            <mwc-list-item value="none">Nothing</mwc-list-item>
-          </ha-select>
-          <div id="nav-path-container" style="display: ${tapAction === 'navigate' ? '' : 'none'}"><paper-input id="nav-path" label="Navigation Path" value="${c.navigation_path || ''}"></paper-input></div>
-          <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><paper-input id="url-path" label="URL" value="${c.url_path || ''}"></paper-input></div>
-          <div id="action-path-container" style="display: ${tapAction === 'perform-action' ? '' : 'none'}"><paper-input id="action-path" label="Action (e.g. light.turn_on)" value="${c.action_path || ''}"></paper-input></div>
+          
+          <div>
+            <label class="secondary">Tap Action</label>
+            <select id="tap-action-select" class="native-select">
+              <option value="none" ${tapAction === 'none' ? 'selected' : ''}>Nothing</option>
+              <option value="default" ${tapAction === 'default' ? 'selected' : ''}>Default (Toggle)</option>
+              <option value="toggle" ${tapAction === 'toggle' ? 'selected' : ''}>Toggle Entity</option>
+              <option value="more-info" ${tapAction === 'more-info' ? 'selected' : ''}>More Info</option>
+              <option value="navigate" ${tapAction === 'navigate' ? 'selected' : ''}>Navigate</option>
+              <option value="url" ${tapAction === 'url' ? 'selected' : ''}>URL</option>
+              <option value="perform-action" ${tapAction === 'perform-action' ? 'selected' : ''}>Perform Action / Call Service</option>
+              <option value="assist" ${tapAction === 'assist' ? 'selected' : ''}>Assist</option>
+            </select>
+          </div>
+
+          <div id="nav-path-container" style="display: ${tapAction === 'navigate' ? '' : 'none'}"><paper-input id="nav-path" label="Navigation Path" value="${tapActionObj.navigation_path || ''}"></paper-input></div>
+          <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><paper-input id="url-path" label="URL" value="${tapActionObj.url_path || ''}"></paper-input></div>
+          <div id="action-path-container" style="display: ${tapAction === 'perform-action' ? '' : 'none'}"><paper-input id="action-path" label="Action (e.g. light.turn_on)" value="${tapActionObj.perform_action || ''}"></paper-input></div>
           <div class="side-by-side">
-            <div><label>Animation Speed: <span id="tap-speed-val">${uiSpeed}</span>x</label><div class="secondary">0.1 = very slow, 1.0 = normal, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.1" max="2.0" step="0.1" pin value="${uiSpeed}"></ha-slider></div>
+            <div><label>Animation Speed: <span id="tap-speed-val">${uiSpeed}</span>x</label><div class="secondary">0.1 = slow, 1.0 = normal, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.1" max="2.0" step="0.1" pin value="${uiSpeed}"></ha-slider></div>
             <div><label>Bop Intensity: <span id="tap-intensity-val">${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}</span>x</label><div class="secondary">How far the head pulls back.</div><ha-slider id="tap-intensity-slider" min="0.5" max="2" step="0.1" pin value="${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}"></ha-slider></div>
           </div>
           <div><label>Rebound Bounces: <span id="tap-bounces-val">${c.tap_bounces !== undefined ? c.tap_bounces : 5}</span></label><div class="secondary">Full oscillation cycles before settling.</div><ha-slider id="tap-bounces-slider" min="1" max="20" step="1" pin value="${c.tap_bounces !== undefined ? c.tap_bounces : 5}"></ha-slider></div>
@@ -628,33 +644,31 @@ class GladosCardEditor extends HTMLElement {
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch'); tapSwitch.checked = c.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => this.configChanged('tap_enabled', ev.target.checked));
     
-    const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
-    tapActionSelect.value = tapAction; 
-    
-    const handleTapAction = () => {
-      const val = tapActionSelect.value;
-      if (val && val !== (this._config.tap_action || 'none')) {
-        this.configChanged('tap_action', val);
-        this.render(); 
-      }
+    // [PATCH]: Write specific tap_action object keys back to the config
+    const updateAction = (updates) => {
+      let current = typeof this._config.tap_action === 'object' ? { ...this._config.tap_action } : { action: 'none' };
+      this.configChanged('tap_action', { ...current, ...updates });
     };
-    tapActionSelect.addEventListener('closed', handleTapAction);
-    tapActionSelect.addEventListener('change', handleTapAction);
+
+    const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
+    tapActionSelect.addEventListener('change', (ev) => {
+      const val = ev.target.value;
+      updateAction({ action: val });
+      this.render(); 
+    });
 
     const navPath = this.shadowRoot.querySelector('#nav-path');
-    if (navPath) navPath.addEventListener('change', (ev) => this.configChanged('navigation_path', ev.target.value));
+    if (navPath) navPath.addEventListener('change', (ev) => updateAction({ navigation_path: ev.target.value }));
     const urlPath = this.shadowRoot.querySelector('#url-path');
-    if (urlPath) urlPath.addEventListener('change', (ev) => this.configChanged('url_path', ev.target.value));
+    if (urlPath) urlPath.addEventListener('change', (ev) => updateAction({ url_path: ev.target.value }));
     const actionPath = this.shadowRoot.querySelector('#action-path');
-    if (actionPath) actionPath.addEventListener('change', (ev) => this.configChanged('action_path', ev.target.value));
+    if (actionPath) actionPath.addEventListener('change', (ev) => updateAction({ perform_action: ev.target.value }));
     
     const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
-    
     tapSpeedSlider.addEventListener('change', (ev) => { 
       const uiVal = Number(ev.target.value);
       this.shadowRoot.querySelector('#tap-speed-val').innerText = uiVal.toFixed(1); 
-      let backendVal = uiVal <= 1.0 ? uiVal / 10 : (1.9 * uiVal) - 1.8;
-      this.configChanged('tap_speed', Number(backendVal.toFixed(3))); 
+      this.configChanged('tap_speed', uiVal); 
     });
     
     const tapIntensitySlider = this.shadowRoot.querySelector('#tap-intensity-slider');
