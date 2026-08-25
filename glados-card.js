@@ -6,8 +6,10 @@ class GladosCard extends HTMLElement {
     this._lastHassMedia = null;
     this._lastHassBpm = null;
   }
+
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 0.2, tap_bounces: 5, tap_intensity: 1.0, tap_action: "none" }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 0.1, tap_bounces: 5, tap_intensity: 1.0, tap_action: "none" }; }
+
   setConfig(config) {
     if (!config.entity && !this.config) {
       this.config = { ...config, entity: 'assist_satellite.example' };
@@ -21,6 +23,7 @@ class GladosCard extends HTMLElement {
         this.applyState(this._currentState, this._currentBpm);
     }
   }
+
   set hass(hass) {
     if (!hass) return;
     this._hass = hass;
@@ -35,10 +38,13 @@ class GladosCard extends HTMLElement {
     const newVoiceState = (entity && hass.states[entity]) ? hass.states[entity].state.toLowerCase() : 'idle';
     const newMediaState = (mediaEntity && hass.states[mediaEntity]) ? hass.states[mediaEntity].state.toLowerCase() : 'paused';
     const newBpmState = (bpmEntity && hass.states[bpmEntity]) ? hass.states[bpmEntity].state : '120';
+    
     if (this._lastHassVoice === newVoiceState && this._lastHassMedia === newMediaState && this._lastHassBpm === newBpmState) return;
+    
     this._lastHassVoice = newVoiceState;
     this._lastHassMedia = newMediaState;
     this._lastHassBpm = newBpmState;
+    
     const currentBpm = isNaN(parseFloat(newBpmState)) ? 120 : parseFloat(newBpmState);
     let effectiveState = 'idle';
     if (['listen', 'wake', 'process', 'think', 'respond', 'speak', 'tts'].some(s => newVoiceState.includes(s))) {
@@ -46,13 +52,16 @@ class GladosCard extends HTMLElement {
     } else if (newMediaState === 'playing') {
       effectiveState = 'dancing';
     }
+    
     if (this._currentState !== effectiveState || (effectiveState === 'dancing' && this._currentBpm !== currentBpm)) {
       this._currentState = effectiveState;
       this._currentBpm = currentBpm;
       if (this.applyState) this.applyState(effectiveState, currentBpm);
     }
   }
+
   getCardSize() { return 6; }
+
   _cleanupTimers() {
     if (this.stopIdleCycle) this.stopIdleCycle();
     if (this.stopDanceCycle) this.stopDanceCycle();
@@ -72,6 +81,17 @@ class GladosCard extends HTMLElement {
       this._tapHandler = null;
     }
   }
+
+  connectedCallback() {
+    if (this.contentReady && this._currentState) {
+      this.applyState(this._currentState, this._currentBpm);
+    }
+  }
+
+  disconnectedCallback() { 
+    this._cleanupTimers(); 
+  }
+
   setupDOM() {
     const zoom = this.config.zoom !== undefined ? this.config.zoom : 85;
     const scale = zoom / 100;
@@ -84,13 +104,18 @@ class GladosCard extends HTMLElement {
         #scene { width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; }
         #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; --led-color: #ffb800; --led-opacity: 0.15; }
         .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: fill 0.2s, opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
+        
         #body-pivot, #head-sway-pivot { will-change: transform; }
+        
         #body-pivot { transform-origin: 140px 116px; animation: body-sway 8s ease-in-out infinite; }
         @keyframes body-sway { 0%, 100% { transform: rotate(-1.4deg); } 50% { transform: rotate( 1.4deg); } }
+        
         #head-sway-pivot { transform-origin: 140px 285px; animation: head-ambient-sway 13s ease-in-out infinite; }
         @keyframes head-ambient-sway { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
+        
         #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
         #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
+        
         #eye-halo, #eye-center { transition: fill 0.8s ease-in-out; }
         .eye-layer { transition: opacity 0.8s ease-in-out; }
         @keyframes eye-breathe { 0%,100%{opacity:.02} 48%{opacity:.2} }
@@ -129,18 +154,114 @@ class GladosCard extends HTMLElement {
               <meshrow><meshpatch><stop path="c 0.06526,23.1603 2.00241,46.4908 2.06774,69.6511"/><stop path="c -4.62124,0 -9.24246,0 -13.8637,0" style="stop-color:#4c4c4c;stop-opacity:1"/><stop path="c 0,-23.1544 0,-46.3088 0,-69.4631" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -3.79e-05,23.1544 2.19999,46.5088 2.20001,69.6631"/><stop path="c -0.810269,0 -1.62054,0 -2.4308,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 1.23e-05,23.1544 2.47e-05,46.3088 3.71e-05,69.4631"/><stop path="c -5.46829,0 -10.9366,0 -16.4049,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -11.1251,0 -22.2503,0 -33.3755,0" style="stop-color:#d6d6d6;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -12.2565,0 -24.513,0 -36.7695,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 -3.2,46.3088 -3.2,69.4631"/><stop path="c -5.18545,0 -10.3709,0 -15.5564,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c -0.08956,23.1544 -2.96042,46.3088 -3.04998,69.4631"/><stop path="c -0.715248,0 -1.4305,0 -2.14575,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch><meshpatch><stop path="c 0,23.1544 0,46.3088 0,69.4631"/><stop path="c -4.7512,0 -9.50239,0 -14.2535,0" style="stop-color:#4c4c4c;stop-opacity:1"/></meshpatch></meshrow>
             </meshgradient>
           </defs>
-          <g id="body-pivot"><g id="torso-swivel"><g id="torso" transform="matrix(1.2,0,0,1.2,-28,-23.2)"><ellipse cx="140" cy="116" rx="55" ry="15" fill="#1c1c26" stroke="#0c0c12" stroke-width="1.2"/><ellipse cx="140" cy="116" rx="46" ry="11" fill="#141420" stroke="#1e1e2c" stroke-width="0.7"/><path d="m 94,126 -8,8 -2,66 q 0,10 10,12 h 92 q 10,-2 10,-12 l -2,-66 -8,-8 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1.4"/><path d="m 90,132 -28,8 -4,40 4,16 12,4 16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/><path d="m 90,136 -24,7 -4,35 4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/><circle cx="60" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/><circle cx="60" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/><path d="m 90,132 c -4,20 -6,40 -4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/><path d="m 190,132 28,8 4,40 -4,16 -12,4 -16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/><path d="m 190,136 24,7 4,35 -4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/><circle cx="220" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/><circle cx="220" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/><path d="m 190,132 c 4,20 6,40 4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/><line x1="90" y1="152" x2="190" y2="152" stroke="#6a6d75" stroke-width="1"/><line x1="89" y1="174" x2="191" y2="174" stroke="#6a6d75" stroke-width="1"/><line x1="140" y1="128" x2="140" y2="210" stroke="#6a6d75" stroke-width="1"/><rect x="94" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/><rect x="96" y="137" width="32" height="16" rx="1.5" fill="#020202"/><g id="led-matrix-left" class="led-matrix" filter="url(#ledGlow)"><rect class="led-dot" x="98" y="140" width="28" height="2" rx="1"/><rect class="led-dot" x="98" y="145" width="28" height="2" rx="1"/><rect class="led-dot" x="98" y="150" width="28" height="2" rx="1"/></g><rect x="150" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/><rect x="152" y="137" width="32" height="16" rx="1.5" fill="#020202"/><g id="led-matrix-right" class="led-matrix" filter="url(#ledGlow)"><rect class="led-dot" x="154" y="140" width="28" height="2" rx="1"/><rect class="led-dot" x="154" y="145" width="28" height="2" rx="1"/><rect class="led-dot" x="154" y="150" width="28" height="2" rx="1"/></g><circle cx="100" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/><circle id="ind-l1" cx="100" cy="180" r="1.5"/><circle cx="108" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/><circle id="ind-l2" cx="108" cy="180" r="1.5"/><circle cx="172" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/><circle id="ind-r1" cx="172" cy="180" r="1.5"/><circle cx="180" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/><circle id="ind-r2" cx="180" cy="180" r="1.5"/></g></g></g>
-          <g id="glados-head-wrapper" transform="translate(0, -65)"><g id="head-sway-pivot"><g id="glados-head"><ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/><ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/><g id="Group_White_Casing"><path id="rect74" fill="url(#meshgradient125)" d="m 135,232 h 10 c 20.41692,0 38.38909,10.09589 49.21698,25.58812 L 205,276.8 c 0,0 2.4,52.45447 2.4,78.7 0,26.24553 -2.4,78.7 -2.4,78.7 l -10.77334,19.19803 C 183.3998,468.8981 165.423,479 145,479 H 135 C 114.59769,479 96.636634,468.91856 85.806278,453.44514 L 75,434.2 c 0,0 -2.4,-52.45447 -2.4,-78.7 0,-26.24553 2.4,-78.7 2.4,-78.7 L 85.808333,257.55193 C 96.638906,242.08017 114.59898,232 135,232 Z"/><rect x="75" y="232" width="130" height="247" rx="60" fill="url(#ceramicShadow)"/></g><g id="Group_Faceplate_Inset"><rect x="93" y="279.25" width="76" height="171.5" rx="38" fill="#000" opacity="0.6" filter="url(#softGlow)"/><rect x="91" y="277.25" width="78" height="173.5" rx="39" fill="url(#bezelGrad)" stroke="#1a1c22" stroke-width="1"/><rect x="93" y="279.25" width="74" height="169.5" rx="37" fill="none" stroke="#6a6d75" stroke-width="1.5"/><g clip-path="url(#cavityClip)"><rect x="97" y="283.25" width="66" height="161.5" rx="33" fill="url(#cavityGrad)"/><rect x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#050607" stroke-width="5" opacity="0.9"/><rect x="107" y="293.25" width="46" height="141.5" rx="23" fill="url(#trackGrad)" stroke="#000000" stroke-width="3"/><g clip-path="url(#trackClip)"><g id="bellows" style="transition: transform 0.15s ease-out;"><g stroke="#000" stroke-width="4.5" stroke-linecap="butt" opacity="0.9"><line x1="107" y1="140" x2="153" y2="140"/><line x1="107" y1="152" x2="153" y2="152"/><line x1="107" y1="164" x2="153" y2="164"/><line x1="107" y1="176" x2="153" y2="176"/><line x1="107" y1="188" x2="153" y2="188"/><line x1="107" y1="200" x2="153" y2="200"/><line x1="107" y1="212" x2="153" y2="212"/><line x1="107" y1="224" x2="153" y2="224"/><line x1="107" y1="236" x2="153" y2="236"/><line x1="107" y1="248" x2="153" y2="248"/><line x1="107" y1="260" x2="153" y2="260"/><line x1="107" y1="272" x2="153" y2="272"/><line x1="107" y1="284" x2="153" y2="284"/><line x1="107" y1="296" x2="153" y2="296"/><line x1="107" y1="308" x2="153" y2="308"/><line x1="107" y1="320" x2="153" y2="320"/><line x1="107" y1="332" x2="153" y2="332"/><line x1="107" y1="344" x2="153" y2="344"/><line x1="107" y1="356" x2="153" y2="356"/><line x1="107" y1="368" x2="153" y2="368"/><line x1="107" y1="380" x2="153" y2="380"/><line x1="107" y1="392" x2="153" y2="392"/><line x1="107" y1="404" x2="153" y2="404"/><line x1="107" y1="416" x2="153" y2="416"/><line x1="107" y1="428" x2="153" y2="428"/><line x1="107" y1="440" x2="153" y2="440"/><line x1="107" y1="452" x2="153" y2="452"/><line x1="107" y1="464" x2="153" y2="464"/><line x1="107" y1="476" x2="153" y2="476"/><line x1="107" y1="488" x2="153" y2="488"/><line x1="107" y1="500" x2="153" y2="500"/><line x1="107" y1="512" x2="153" y2="512"/><line x1="107" y1="524" x2="153" y2="524"/></g></g></g><g id="eyeball-assembly" style="transition: transform 0.15s ease-out;"><circle cx="130" cy="364" r="26" fill="#1c1e22" stroke="#000000" stroke-width="2"/><circle cx="130" cy="364" r="23" fill="#0a0b0c"/><circle cx="147" cy="388" r="3.5" fill="#1a0000" stroke="#000000" stroke-width="1"/><circle id="indicator-dot" cx="147" cy="388" r="2.5" fill="#ff2200" opacity="0.8" filter="url(#softGlow)"/><circle id="eye-halo" cx="130" cy="364" r="25" fill="#330800" opacity=".05" filter="url(#eyeBloom)"/><g id="eye-pupil" style="transition: transform 0.15s ease-out;"><circle id="eye-layer-idle" cx="130" cy="364" r="17.6" fill="url(#eyeGradIdle)" filter="url(#softGlow)" class="eye-layer" opacity="1" /><circle id="eye-layer-listen" cx="130" cy="364" r="17.6" fill="url(#eyeGradListen)" filter="url(#softGlow)" class="eye-layer" opacity="0" /><circle id="eye-layer-process" cx="130" cy="364" r="17.6" fill="url(#eyeGradProcess)" filter="url(#softGlow)" class="eye-layer" opacity="0" /><circle id="eye-layer-respond" cx="130" cy="364" r="17.6" fill="url(#eyeGradRespond)" filter="url(#softGlow)" class="eye-layer" opacity="0" /><circle id="eye-layer-dance" cx="130" cy="364" r="17.6" fill="url(#eyeGradDance)" filter="url(#softGlow)" class="eye-layer" opacity="0" /><circle id="eye-center" cx="130" cy="364" r="6.6" fill="#ffe855" /><circle cx="128" cy="362" r="2.2" fill="#ffffff" opacity="0.7" /></g><g clip-path="url(#eyeballClip)"><path id="eye-lid" d="m 80,200 h 100 v 164 h -24 a 26,26 0 0 0 -52,0 H 80 Z" fill="url(#lidGrad)" stroke="#000000" stroke-width="2"/><path id="eye-lid-bottom" d="M 80,500 H 180 V 364 h -24 a 26,26 0 0 1 -52,0 H 80 Z" fill="url(#lidGradFlip)" stroke="#000000" stroke-width="2"/></g></g></g></g><path d="m 92,359 5,2 v 6 l -5,2 z" fill="#050505"/><path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/><rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/></g></g></g>
+          <g id="body-pivot">
+            <g id="torso-swivel">
+              <g id="torso" transform="matrix(1.2,0,0,1.2,-28,-23.2)">
+                <ellipse cx="140" cy="116" rx="55" ry="15" fill="#1c1c26" stroke="#0c0c12" stroke-width="1.2"/>
+                <ellipse cx="140" cy="116" rx="46" ry="11" fill="#141420" stroke="#1e1e2c" stroke-width="0.7"/>
+                <path d="m 94,126 -8,8 -2,66 q 0,10 10,12 h 92 q 10,-2 10,-12 l -2,-66 -8,-8 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1.4"/>
+                <path d="m 90,132 -28,8 -4,40 4,16 12,4 16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
+                <path d="m 90,136 -24,7 -4,35 4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
+                <circle cx="60" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
+                <circle cx="60" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
+                <path d="m 90,132 c -4,20 -6,40 -4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
+                <path d="m 190,132 28,8 4,40 -4,16 -12,4 -16,-4 z" fill="url(#ceramicBackgroundGrad)" stroke="#6a6d75" stroke-width="1"/>
+                <path d="m 190,136 24,7 4,35 -4,14 10,4 14,-4 z" fill="#eeeeee" opacity="0.05"/>
+                <circle cx="220" cy="168" r="9" fill="#14141c" stroke="#0c0c12" stroke-width="1"/>
+                <circle cx="220" cy="168" r="5.5" fill="#0c0c10" stroke="#1a1a22" stroke-width="0.8"/>
+                <path d="m 190,132 c 4,20 6,40 4,60" stroke="#1a1a22" stroke-width="2.5" fill="none" opacity="0.8"/>
+                <line x1="90" y1="152" x2="190" y2="152" stroke="#6a6d75" stroke-width="1"/>
+                <line x1="89" y1="174" x2="191" y2="174" stroke="#6a6d75" stroke-width="1"/>
+                <line x1="140" y1="128" x2="140" y2="210" stroke="#6a6d75" stroke-width="1"/>
+                <rect x="94" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
+                <rect x="96" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
+                <g id="led-matrix-left" class="led-matrix" filter="url(#ledGlow)">
+                  <rect class="led-dot" x="98" y="140" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="98" y="145" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="98" y="150" width="28" height="2" rx="1"/>
+                </g>
+                <rect x="150" y="135" width="36" height="20" rx="2.5" fill="#050508" stroke="#101014" stroke-width="0.6"/>
+                <rect x="152" y="137" width="32" height="16" rx="1.5" fill="#020202"/>
+                <g id="led-matrix-right" class="led-matrix" filter="url(#ledGlow)">
+                  <rect class="led-dot" x="154" y="140" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="154" y="145" width="28" height="2" rx="1"/>
+                  <rect class="led-dot" x="154" y="150" width="28" height="2" rx="1"/>
+                </g>
+                <circle cx="100" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-l1" cx="100" cy="180" r="1.5"/>
+                <circle cx="108" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-l2" cx="108" cy="180" r="1.5"/>
+                <circle cx="172" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-r1" cx="172" cy="180" r="1.5"/>
+                <circle cx="180" cy="180" r="2.5" fill="#0a0a0e" stroke="#101014" stroke-width="0.5"/>
+                <circle id="ind-r2" cx="180" cy="180" r="1.5"/>
+              </g>
+            </g>
+          </g>
+          <g id="glados-head-wrapper" transform="translate(0, -65)">
+            <g id="head-sway-pivot">
+              <g id="glados-head">
+                <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
+                <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
+                <g id="Group_White_Casing">
+                  <path id="rect74" fill="url(#meshgradient125)" d="m 135,232 h 10 c 20.41692,0 38.38909,10.09589 49.21698,25.58812 L 205,276.8 c 0,0 2.4,52.45447 2.4,78.7 0,26.24553 -2.4,78.7 -2.4,78.7 l -10.77334,19.19803 C 183.3998,468.8981 165.423,479 145,479 H 135 C 114.59769,479 96.636634,468.91856 85.806278,453.44514 L 75,434.2 c 0,0 -2.4,-52.45447 -2.4,-78.7 0,-26.24553 2.4,-78.7 2.4,-78.7 L 85.808333,257.55193 C 96.638906,242.08017 114.59898,232 135,232 Z"/>
+                  <rect x="75" y="232" width="130" height="247" rx="60" fill="url(#ceramicShadow)"/>
+                </g>
+                <g id="Group_Faceplate_Inset">
+                  <rect x="93" y="279.25" width="76" height="171.5" rx="38" fill="#000" opacity="0.6" filter="url(#softGlow)"/>
+                  <rect x="91" y="277.25" width="78" height="173.5" rx="39" fill="url(#bezelGrad)" stroke="#1a1c22" stroke-width="1"/>
+                  <rect x="93" y="279.25" width="74" height="169.5" rx="37" fill="none" stroke="#6a6d75" stroke-width="1.5"/>
+                  <g clip-path="url(#cavityClip)">
+                    <rect x="97" y="283.25" width="66" height="161.5" rx="33" fill="url(#cavityGrad)"/>
+                    <rect x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#050607" stroke-width="5" opacity="0.9"/>
+                    <rect x="107" y="293.25" width="46" height="141.5" rx="23" fill="url(#trackGrad)" stroke="#000000" stroke-width="3"/>
+                    <g clip-path="url(#trackClip)">
+                      <g id="bellows" style="transition: transform 0.15s ease-out;">
+                        <g stroke="#000" stroke-width="4.5" stroke-linecap="butt" opacity="0.9">
+                          <line x1="107" y1="140" x2="153" y2="140"/><line x1="107" y1="152" x2="153" y2="152"/><line x1="107" y1="164" x2="153" y2="164"/><line x1="107" y1="176" x2="153" y2="176"/><line x1="107" y1="188" x2="153" y2="188"/><line x1="107" y1="200" x2="153" y2="200"/><line x1="107" y1="212" x2="153" y2="212"/><line x1="107" y1="224" x2="153" y2="224"/><line x1="107" y1="236" x2="153" y2="236"/><line x1="107" y1="248" x2="153" y2="248"/><line x1="107" y1="260" x2="153" y2="260"/><line x1="107" y1="272" x2="153" y2="272"/><line x1="107" y1="284" x2="153" y2="284"/><line x1="107" y1="296" x2="153" y2="296"/><line x1="107" y1="308" x2="153" y2="308"/><line x1="107" y1="320" x2="153" y2="320"/><line x1="107" y1="332" x2="153" y2="332"/><line x1="107" y1="344" x2="153" y2="344"/><line x1="107" y1="356" x2="153" y2="356"/><line x1="107" y1="368" x2="153" y2="368"/><line x1="107" y1="380" x2="153" y2="380"/><line x1="107" y1="392" x2="153" y2="392"/><line x1="107" y1="404" x2="153" y2="404"/><line x1="107" y1="416" x2="153" y2="416"/><line x1="107" y1="428" x2="153" y2="428"/><line x1="107" y1="440" x2="153" y2="440"/><line x1="107" y1="452" x2="153" y2="452"/><line x1="107" y1="464" x2="153" y2="464"/><line x1="107" y1="476" x2="153" y2="476"/><line x1="107" y1="488" x2="153" y2="488"/><line x1="107" y1="500" x2="153" y2="500"/><line x1="107" y1="512" x2="153" y2="512"/><line x1="107" y1="524" x2="153" y2="524"/>
+                        </g>
+                      </g>
+                    </g>
+                    <g id="eyeball-assembly" style="transition: transform 0.15s ease-out;">
+                      <circle cx="130" cy="364" r="26" fill="#1c1e22" stroke="#000000" stroke-width="2"/>
+                      <circle cx="130" cy="364" r="23" fill="#0a0b0c"/>
+                      <circle cx="147" cy="388" r="3.5" fill="#1a0000" stroke="#000000" stroke-width="1"/>
+                      <circle id="indicator-dot" cx="147" cy="388" r="2.5" fill="#ff2200" opacity="0.8" filter="url(#softGlow)"/>
+                      <circle id="eye-halo" cx="130" cy="364" r="25" fill="#330800" opacity=".05" filter="url(#eyeBloom)"/>
+                      <g id="eye-pupil" style="transition: transform 0.15s ease-out;">
+                        <circle id="eye-layer-idle" cx="130" cy="364" r="17.6" fill="url(#eyeGradIdle)" filter="url(#softGlow)" class="eye-layer" opacity="1" />
+                        <circle id="eye-layer-listen" cx="130" cy="364" r="17.6" fill="url(#eyeGradListen)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
+                        <circle id="eye-layer-process" cx="130" cy="364" r="17.6" fill="url(#eyeGradProcess)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
+                        <circle id="eye-layer-respond" cx="130" cy="364" r="17.6" fill="url(#eyeGradRespond)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
+                        <circle id="eye-layer-dance" cx="130" cy="364" r="17.6" fill="url(#eyeGradDance)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
+                        <circle id="eye-center" cx="130" cy="364" r="6.6" fill="#ffe855" />
+                        <circle cx="128" cy="362" r="2.2" fill="#ffffff" opacity="0.7" />
+                      </g>
+                      <g clip-path="url(#eyeballClip)">
+                        <path id="eye-lid" d="m 80,200 h 100 v 164 h -24 a 26,26 0 0 0 -52,0 H 80 Z" fill="url(#lidGrad)" stroke="#000000" stroke-width="2"/>
+                        <path id="eye-lid-bottom" d="M 80,500 H 180 V 364 h -24 a 26,26 0 0 1 -52,0 H 80 Z" fill="url(#lidGradFlip)" stroke="#000000" stroke-width="2"/>
+                      </g>
+                    </g>
+                  </g>
+                </g>
+                <path d="m 92,359 5,2 v 6 l -5,2 z" fill="#050505"/>
+                <path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/>
+                <rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/>
+              </g>
+            </g>
+          </g>
         </svg>
       </div>
     `;
     setTimeout(() => { if (this.isConnected) this.applyMeshPolyfill(this.shadowRoot); }, 50);
   }
+
   applyMeshPolyfill(root) {
     const t="http://www.w3.org/2000/svg",e="http://www.w3.org/1999/xlink",s="http://www.w3.org/1999/xhtml",r=2;
     const n=(t,e,s,r)=>{let n=new x(.5*(e.x+s.x),.5*(e.y+s.y)),o=new x(.5*(t.x+e.x),.5*(t.y+e.y)),i=new x(.5*(s.x+r.x),.5*(s.y+r.y)),a=new x(.5*(n.x+o.x),.5*(n.y+o.y)),h=new x(.5*(n.x+i.x),.5*(n.y+i.y)),l=new x(.5*(a.x+h.x),.5*(a.y+h.y));return[[t,o,a,l],[l,h,i,r]]},o=t=>{let e=t[0].distSquared(t[1]),s=t[2].distSquared(t[3]),r=.25*t[0].distSquared(t[2]),n=.25*t[1].distSquared(t[3]),o=e>s?e:s,i=r>n?r:n;return 18*(o>i?o:i)},i=(t,e)=>Math.sqrt(t.distSquared(e)),a=(t,e)=>t.scale(2/3).add(e.scale(1/3)),h=t=>{let e,s,r,n,o,i,a,h=new g;return t.match(/(\w+\(\s*[^)]+\))+/g).forEach(t=>{let l=t.match(/[\w.-]+/g),d=l.shift();switch(d){case"translate":2===l.length?e=new g(1,0,0,1,l[0],l[1]):(console.error("mesh.js: translate does not have 2 arguments!"),e=new g(1,0,0,1,0,0)),h=h.append(e);break;case"scale":1===l.length?s=new g(l[0],0,0,l[0],0,0):2===l.length?s=new g(l[0],0,0,l[1],0,0):(console.error("mesh.js: scale does not have 1 or 2 arguments!"),s=new g(1,0,0,1,0,0)),h=h.append(s);break;case"rotate":if(3===l.length&&(e=new g(1,0,0,1,l[1],l[2]),h=h.append(e)),l[0]){r=l[0]*Math.PI/180;let t=Math.cos(r),e=Math.sin(r);Math.abs(t)<1e-16&&(t=0),Math.abs(e)<1e-16&&(e=0),a=new g(t,e,-e,t,0,0),h=h.append(a)}else console.error("math.js: No argument to rotate transform!");3===l.length&&(e=new g(1,0,0,1,-l[1],-l[2]),h=h.append(e));break;case"skewX":l[0]?(r=l[0]*Math.PI/180,n=Math.tan(r),o=new g(1,0,n,1,0,0),h=h.append(o)):console.error("math.js: No argument to skewX transform!");break;case"skewY":l[0]?(r=l[0]*Math.PI/180,n=Math.tan(r),i=new g(1,n,0,1,0,0),h=h.append(i)):console.error("math.js: No argument to skewY transform!");break;case"matrix":6===l.length?h=h.append(new g(...l)):console.error("math.js: Incorrect number of arguments for matrix!");break;default:console.error("mesh.js: Unhandled transform type: "+d)}}),h},l=t=>{let e=[],s=t.split(/[ ,]+/);for(let t=0,r=s.length-1;t<r;t+=2)e.push(new x(parseFloat(s[t]),parseFloat(s[t+1])));return e},d=(t,e)=>{for(let s in e)t.setAttribute(s,e[s])},c=(t,e,s,r,n)=>{let o,i,a=[0,0,0,0];for(let h=0;h<3;++h)e[h]<t[h]&&e[h]<s[h]||t[h]<e[h]&&s[h]<e[h]?a[h]=0:(a[h]=.5*((e[h]-t[h])/r+(s[h]-e[h])/n),o=Math.abs(3*(e[h]-t[h])/r),i=Math.abs(3*(s[h]-e[h])/n),a[h]>o?a[h]=o:a[h]>i&&(a[h]=i));return a},u=[[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],[-3,3,0,0,-2,-1,0,0,0,0,0,0,0,0,0,0],[2,-2,0,0,1,1,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,0,-3,3,0,0,-2,-1,0,0],[0,0,0,0,0,0,0,0,2,-2,0,0,1,1,0,0],[-3,0,3,0,0,0,0,0,-2,0,-1,0,0,0,0,0],[0,0,0,0,-3,0,3,0,0,0,0,0,-2,0,-1,0],[9,-9,-9,9,6,3,-6,-3,6,-6,3,-3,4,2,2,1],[-6,6,6,-6,-3,-3,3,3,-4,4,-2,2,-2,-2,-1,-1],[2,0,-2,0,0,0,0,0,1,0,1,0,0,0,0,0],[0,0,0,0,2,0,-2,0,0,0,0,0,1,0,1,0],[-6,6,6,-6,-4,-2,4,2,-3,3,-3,3,-2,-1,-2,-1],[4,-4,-4,4,2,2,-2,-2,2,-2,2,-2,1,1,1,1]],f=t=>{let e=[];for(let s=0;s<16;++s){e[s]=0;for(let r=0;r<16;++r)e[s]+=u[s][r]*t[r]}return e},p=(t,e,s)=>{const r=e*e,n=s*s,o=e*e*e,i=s*s*s;return t[0]+t[1]*e+t[2]*r+t[3]*o+t[4]*s+t[5]*s*e+t[6]*s*r+t[7]*s*o+t[8]*n+t[9]*n*e+t[10]*n*r+t[11]*n*o+t[12]*i+t[13]*i*e+t[14]*i*r+t[15]*i*o},y=t=>{let e=[],s=[],r=[];for(let s=0;s<4;++s)e[s]=[],e[s][0]=n(t[0][s],t[1][s],t[2][s],t[3][s]),e[s][1]=[],e[s][1].push(...n(...e[s][0][0])),e[s][1].push(...n(...e[s][0][1])),e[s][2]=[],e[s][2].push(...n(...e[s][1][0])),e[s][2].push(...n(...e[s][1][1])),e[s][2].push(...n(...e[s][1][2])),e[s][2].push(...n(...e[s][1][3]));for(let t=0;t<8;++t){s[t]=[];for(let r=0;r<4;++r)s[t][r]=[],s[t][r][0]=n(e[0][2][t][r],e[1][2][t][r],e[2][2][t][r],e[3][2][t][r]),s[t][r][1]=[],s[t][r][1].push(...n(...s[t][r][0][0])),s[t][r][1].push(...n(...s[t][r][0][1])),s[t][r][2]=[],s[t][r][2].push(...n(...s[t][r][1][0])),s[t][r][2].push(...n(...s[t][r][1][1])),s[t][r][2].push(...n(...s[t][r][1][2])),s[t][r][2].push(...n(...s[t][r][1][3]))}for(let t=0;t<8;++t){r[t]=[];for(let e=0;e<8;++e)r[t][e]=[],r[t][e][0]=s[t][0][2][e],r[t][e][1]=s[t][1][2][e],r[t][e][2]=s[t][2][2][e],r[t][e][3]=s[t][3][2][e]}return r};class x{constructor(t,e){this.x=t||0,this.y=e||0}toString(){return`(x=${this.x}, y=${this.y})`}clone(){return new x(this.x,this.y)}add(t){return new x(this.x+t.x,this.y+t.y)}scale(t){return void 0===t.x?new x(this.x*t,this.y*t):new x(this.x*t.x,this.y*t.y)}distSquared(t){let e=this.x-t.x,s=this.y-t.y;return e*e+s*s}transform(t){let e=this.x*t.a+this.y*t.c+t.e,s=this.x*t.b+this.y*t.d+t.f;return new x(e,s)}}class g{constructor(t,e,s,r,n,o){void 0===t?(this.a=1,this.b=0,this.c=0,this.d=1,this.e=0,this.f=0):(this.a=t,this.b=e,this.c=s,this.d=r,this.e=n,this.f=o)}toString(){return`affine: ${this.a} ${this.c} ${this.e} \n       ${this.b} ${this.d} ${this.f}`}append(t){let e=this.a*t.a+this.c*t.b,s=this.b*t.a+this.d*t.b,r=this.a*t.c+this.c*t.d,n=this.b*t.c+this.d*t.d,o=this.a*t.e+this.c*t.f+this.e,i=this.b*t.e+this.d*t.f+this.f;return new g(e,s,r,n,o,i)}}class w{constructor(t,e){this.nodes=t,this.colors=e}paintCurve(t,e){if(o(this.nodes)>r){const s=n(...this.nodes);let r=[[],[]],o=[[],[]];for(let t=0;t<4;++t)r[0][t]=this.colors[0][t],r[1][t]=(this.colors[0][t]+this.colors[1][t])/2,o[0][t]=r[1][t],o[1][t]=this.colors[1][t];let i=new w(s[0],r),a=new w(s[1],o);i.paintCurve(t,e),a.paintCurve(t,e)}else{let s=Math.round(this.nodes[0].x);if(s>=0&&s<e){let r=4*(~~this.nodes[0].y*e+s);t[r]=Math.round(this.colors[0][0]),t[r+1]=Math.round(this.colors[0][1]),t[r+2]=Math.round(this.colors[0][2]),t[r+3]=Math.round(this.colors[0][3])}}}}class m{constructor(t,e){this.nodes=t,this.colors=e}split(){let t=[[],[],[],[]],e=[[],[],[],[]],s=[[[],[]],[[],[]]],r=[[[],[]],[[],[]]];for(let s=0;s<4;++s){const r=n(this.nodes[0][s],this.nodes[1][s],this.nodes[2][s],this.nodes[3][s]);t[0][s]=r[0][0],t[1][s]=r[0][1],t[2][s]=r[0][2],t[3][s]=r[0][3],e[0][s]=r[1][0],e[1][s]=r[1][1],e[2][s]=r[1][2],e[3][s]=r[1][3]}for(let t=0;t<4;++t)s[0][0][t]=this.colors[0][0][t],s[0][1][t]=this.colors[0][1][t],s[1][0][t]=(this.colors[0][0][t]+this.colors[1][0][t])/2,s[1][1][t]=(this.colors[0][1][t]+this.colors[1][1][t])/2,r[0][0][t]=s[1][0][t],r[0][1][t]=s[1][1][t],r[1][0][t]=this.colors[1][0][t],r[1][1][t]=this.colors[1][1][t];return[new m(t,s),new m(e,r)]}paint(t,e){let s,n=!1;for(let t=0;t<4;++t)if((s=o([this.nodes[0][t],this.nodes[1][t],this.nodes[2][t],this.nodes[3][t]]))>r){n=!0;break}if(n){let s=this.split();s[0].paint(t,e),s[1].paint(t,e)}else{new w([...this.nodes[0]],[...this.colors[0]]).paintCurve(t,e)}}}class b{constructor(t){this.readMesh(t),this.type=t.getAttribute("type")||"bilinear"}readMesh(t){let e=[[]],s=[[]],r=Number(t.getAttribute("x")),n=Number(t.getAttribute("y"));e[0][0]=new x(r,n);let o=t.children;for(let t=0,r=o.length;t<r;++t){e[3*t+1]=[],e[3*t+2]=[],e[3*t+3]=[],s[t+1]=[];let r=o[t].children;for(let n=0,o=r.length;n<o;++n){let o=r[n].children;for(let r=0,i=o.length;r<i;++r){let i=r;0!==t&&++i;let h,d=o[r].getAttribute("path"),c="l";null!=d&&(c=(h=d.match(/\s*([lLcC])\s*(.*)/))[1]);let u=l(h[2]);switch(c){case"l":0===i?(e[3*t][3*n+3]=u[0].add(e[3*t][3*n]),e[3*t][3*n+1]=a(e[3*t][3*n],e[3*t][3*n+3]),e[3*t][3*n+2]=a(e[3*t][3*n+3],e[3*t][3*n])):1===i?(e[3*t+3][3*n+3]=u[0].add(e[3*t][3*n+3]),e[3*t+1][3*n+3]=a(e[3*t][3*n+3],e[3*t+3][3*n+3]),e[3*t+2][3*n+3]=a(e[3*t+3][3*n+3],e[3*t][3*n+3])):2===i?(0===n&&(e[3*t+3][3*n+0]=u[0].add(e[3*t+3][3*n+3])),e[3*t+3][3*n+1]=a(e[3*t+3][3*n],e[3*t+3][3*n+3]),e[3*t+3][3*n+2]=a(e[3*t+3][3*n+3],e[3*t+3][3*n])):(e[3*t+1][3*n]=a(e[3*t][3*n],e[3*t+3][3*n]),e[3*t+2][3*n]=a(e[3*t+3][3*n],e[3*t][3*n]));break;case"L":0===i?(e[3*t][3*n+3]=u[0],e[3*t][3*n+1]=a(e[3*t][3*n],e[3*t][3*n+3]),e[3*t][3*n+2]=a(e[3*t][3*n+3],e[3*t][3*n])):1===i?(e[3*t+3][3*n+3]=u[0],e[3*t+1][3*n+3]=a(e[3*t][3*n+3],e[3*t+3][3*n+3]),e[3*t+2][3*n+3]=a(e[3*t+3][3*n+3],e[3*t][3*n+3])):2===i?(0===n&&(e[3*t+3][3*n+0]=u[0]),e[3*t+3][3*n+1]=a(e[3*t+3][3*n],e[3*t+3][3*n+3]),e[3*t+3][3*n+2]=a(e[3*t+3][3*n+3],e[3*t+3][3*n])):(e[3*t+1][3*n]=a(e[3*t][3*n],e[3*t+3][3*n]),e[3*t+2][3*n]=a(e[3*t+3][3*n],e[3*t][3*n]));break;case"c":0===i?(e[3*t][3*n+1]=u[0].add(e[3*t][3*n]),e[3*t][3*n+2]=u[1].add(e[3*t][3*n]),e[3*t][3*n+3]=u[2].add(e[3*t][3*n])):1===i?(e[3*t+1][3*n+3]=u[0].add(e[3*t][3*n+3]),e[3*t+2][3*n+3]=u[1].add(e[3*t][3*n+3]),e[3*t+3][3*n+3]=u[2].add(e[3*t][3*n+3])):2===i?(e[3*t+3][3*n+2]=u[0].add(e[3*t+3][3*n+3]),e[3*t+3][3*n+1]=u[1].add(e[3*t+3][3*n+3]),0===n&&(e[3*t+3][3*n+0]=u[2].add(e[3*t+3][3*n+3]))):(e[3*t+2][3*n]=u[0].add(e[3*t+3][3*n]),e[3*t+1][3*n]=u[1].add(e[3*t+3][3*n]));break;case"C":0===i?(e[3*t][3*n+1]=u[0],e[3*t][3*n+2]=u[1],e[3*t][3*n+3]=u[2]):1===i?(e[3*t+1][3*n+3]=u[0],e[3*t+2][3*n+3]=u[1],e[3*t+3][3*n+3]=u[2]):2===i?(e[3*t+3][3*n+2]=u[0],e[3*t+3][3*n+1]=u[1],0===n&&(e[3*t+3][3*n+0]=u[2])):(e[3*t+2][3*n]=u[0],e[3*t+1][3*n]=u[1]);break;default:console.error("mesh.js: "+c+" invalid path type.")}if(0===t&&0===n||r>0){let e=window.getComputedStyle(o[r]).stopColor.match(/^rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/i),a=window.getComputedStyle(o[r]).stopOpacity,h=255;a&&(h=Math.floor(255*a)),e&&(0===i?(s[t][n]=[],s[t][n][0]=Math.floor(e[1]),s[t][n][1]=Math.floor(e[2]),s[t][n][2]=Math.floor(e[3]),s[t][n][3]=h):1===i?(s[t][n+1]=[],s[t][n+1][0]=Math.floor(e[1]),s[t][n+1][1]=Math.floor(e[2]),s[t][n+1][2]=Math.floor(e[3]),s[t][n+1][3]=h):2===i?(s[t+1][n+1]=[],s[t+1][n+1][0]=Math.floor(e[1]),s[t+1][n+1][1]=Math.floor(e[2]),s[t+1][n+1][2]=Math.floor(e[3]),s[t+1][n+1][3]=h):3===i&&(s[t+1][n]=[],s[t+1][n][0]=Math.floor(e[1]),s[t+1][n][1]=Math.floor(e[2]),s[t+1][n][2]=Math.floor(e[3]),s[t+1][n][3]=h))}}e[3*t+1][3*n+1]=new x,e[3*t+1][3*n+2]=new x,e[3*t+2][3*n+1]=new x,e[3*t+2][3*n+2]=new x,e[3*t+1][3*n+1].x=(-4*e[3*t][3*n].x+6*(e[3*t][3*n+1].x+e[3*t+1][3*n].x)+-2*(e[3*t][3*n+3].x+e[3*t+3][3*n].x)+3*(e[3*t+3][3*n+1].x+e[3*t+1][3*n+3].x)+-1*e[3*t+3][3*n+3].x)/9,e[3*t+1][3*n+2].x=(-4*e[3*t][3*n+3].x+6*(e[3*t][3*n+2].x+e[3*t+1][3*n+3].x)+-2*(e[3*t][3*n].x+e[3*t+3][3*n+3].x)+3*(e[3*t+3][3*n+2].x+e[3*t+1][3*n].x)+-1*e[3*t+3][3*n].x)/9,e[3*t+2][3*n+1].x=(-4*e[3*t+3][3*n].x+6*(e[3*t+3][3*n+1].x+e[3*t+2][3*n].x)+-2*(e[3*t+3][3*n+3].x+e[3*t][3*n].x)+3*(e[3*t][3*n+1].x+e[3*t+2][3*n+3].x)+-1*e[3*t][3*n+3].x)/9,e[3*t+2][3*n+2].x=(-4*e[3*t+3][3*n+3].x+6*(e[3*t+3][3*n+2].x+e[3*t+2][3*n+3].x)+-2*(e[3*t+3][3*n].x+e[3*t][3*n+3].x)+3*(e[3*t][3*n+2].x+e[3*t+2][3*n].x)+-1*e[3*t][3*n].x)/9,e[3*t+1][3*n+1].y=(-4*e[3*t][3*n].y+6*(e[3*t][3*n+1].y+e[3*t+1][3*n].y)+-2*(e[3*t][3*n+3].y+e[3*t+3][3*n].y)+3*(e[3*t+3][3*n+1].y+e[3*t+1][3*n+3].y)+-1*e[3*t+3][3*n+3].y)/9,e[3*t+1][3*n+2].y=(-4*e[3*t][3*n+3].y+6*(e[3*t][3*n+2].y+e[3*t+1][3*n+3].y)+-2*(e[3*t][3*n].y+e[3*t+3][3*n+3].y)+3*(e[3*t+3][3*n+2].y+e[3*t+1][3*n].y)+-1*e[3*t+3][3*n].y)/9,e[3*t+2][3*n+1].y=(-4*e[3*t+3][3*n].y+6*(e[3*t+3][3*n+1].y+e[3*t+2][3*n].y)+-2*(e[3*t+3][3*n+3].y+e[3*t][3*n].y)+3*(e[3*t][3*n+1].y+e[3*t+2][3*n+3].y)+-1*e[3*t][3*n+3].y)/9,e[3*t+2][3*n+2].y=(-4*e[3*t+3][3*n+3].y+6*(e[3*t+3][3*n+2].y+e[3*t+2][3*n+3].y)+-2*(e[3*t+3][3*n].y+e[3*t][3*n+3].y)+3*(e[3*t][3*n+2].y+e[3*t+2][3*n].y)+-1*e[3*t][3*n].y)/9}}this.nodes=e,this.colors=s}paintMesh(t,e){let s=(this.nodes.length-1)/3,r=(this.nodes[0].length-1)/3;if("bilinear"===this.type||s<2||r<2){let n;for(let o=0;o<s;++o)for(let s=0;s<r;++s){let r=[];for(let t=3*o,e=3*o+4;t<e;++t)r.push(this.nodes[t].slice(3*s,3*s+4));let i=[];i.push(this.colors[o].slice(s,s+2)),i.push(this.colors[o+1].slice(s,s+2)),(n=new m(r,i)).paint(t,e)}}else{let n,o,a,h,l,d,u;const x=s,g=r;s++,r++;let w=new Array(s);for(let t=0;t<s;++t){w[t]=new Array(r);for(let e=0;e<r;++e)w[t][e]=[],w[t][e][0]=this.nodes[3*t][3*e],w[t][e][1]=this.colors[t][e]}for(let t=0;t<s;++t)for(let e=0;e<r;++e)0!==t&&t!==x&&(n=i(w[t-1][e][0],w[t][e][0]),o=i(w[t+1][e][0],w[t][e][0]),w[t][e][2]=c(w[t-1][e][1],w[t][e][1],w[t+1][e][1],n,o)),0!==e&&e!==g&&(n=i(w[t][e-1][0],w[t][e][0]),o=i(w[t][e+1][0],w[t][e][0]),w[t][e][3]=c(w[t][e-1][1],w[t][e][1],w[t][e+1][1],n,o));for(let t=0;t<r;++t){w[0][t][2]=[],w[x][t][2]=[];for(let e=0;e<4;++e)n=i(w[1][t][0],w[0][t][0]),o=i(w[x][t][0],w[x-1][t][0]),w[0][t][2][e]=n>0?2*(w[1][t][1][e]-w[0][t][1][e])/n-w[1][t][2][e]:0,w[x][t][2][e]=o>0?2*(w[x][t][1][e]-w[x-1][t][1][e])/o-w[x-1][t][2][e]:0}for(let t=0;t<s;++t){w[t][0][3]=[],w[t][g][3]=[];for(let e=0;e<4;++e)n=i(w[t][1][0],w[t][0][0]),o=i(w[t][g][0],w[t][g-1][0]),w[t][0][3][e]=n>0?2*(w[t][1][1][e]-w[t][0][1][e])/n-w[t][1][3][e]:0,w[t][g][3][e]=o>0?2*(w[t][g][1][e]-w[t][g-1][1][e])/o-w[t][g-1][3][e]:0}for(let s=0;s<x;++s)for(let r=0;r<g;++r){let n=i(w[s][r][0],w[s+1][r][0]),o=i(w[s][r+1][0],w[s+1][r+1][0]),c=i(w[s][r][0],w[s][r+1][0]),x=i(w[s+1][r][0],w[s+1][r+1][0]),g=[[],[],[],[]];for(let t=0;t<4;++t){(d=[])[0]=w[s][r][1][t],d[1]=w[s+1][r][1][t],d[2]=w[s][r+1][1][t],d[3]=w[s+1][r+1][1][t],d[4]=w[s][r][2][t]*n,d[5]=w[s+1][r][2][t]*n,d[6]=w[s][r+1][2][t]*o,d[7]=w[s+1][r+1][2][t]*o,d[8]=w[s][r][3][t]*c,d[9]=w[s+1][r][3][t]*x,d[10]=w[s][r+1][3][t]*c,d[11]=w[s+1][r+1][3][t]*x,d[12]=0,d[13]=0,d[14]=0,d[15]=0,u=f(d);for(let e=0;e<9;++e){g[t][e]=[];for(let s=0;s<9;++s)g[t][e][s]=p(u,e/8,s/8),g[t][e][s]>255?g[t][e][s]=255:g[t][e][s]<0&&(g[t][e][s]=0)}}h=[];for(let t=3*s,e=3*s+4;t<e;++t)h.push(this.nodes[t].slice(3*r,3*r+4));l=y(h);for(let s=0;s<8;++s)for(let r=0;r<8;++r)(a=new m(l[s][r],[[[g[0][s][r],g[1][s][r],g[2][s][r],g[3][s][r]],[g[0][s][r+1],g[1][s][r+1],g[2][s][r+1],g[3][s][r+1]]],[[g[0][s+1][r],g[1][s+1][r],g[2][s+1][r],g[3][s+1][r]],[g[0][s+1][r+1],g[1][s+1][r+1],g[2][s+1][r+1],g[3][s+1][r+1]]]])).paint(t,e)}}}transform(t){if(t instanceof x)for(let e=0,s=this.nodes.length;e<s;++e)for(let s=0,r=this.nodes[0].length;s<r;++s)this.nodes[e][s]=this.nodes[e][s].add(t);else if(t instanceof g)for(let e=0,s=this.nodes.length;e<s;++e)for(let s=0,r=this.nodes[0].length;s<r;++s)this.nodes[e][s]=this.nodes[e][s].transform(t)}scale(t){for(let e=0,s=this.nodes.length;e<s;++e)for(let s=0,r=this.nodes[0].length;s<r;++s)this.nodes[e][s]=this.nodes[e][s].scale(t)}}
     root.querySelectorAll("rect,circle,ellipse,path,text").forEach((el,n)=>{let o=el.getAttribute("id");o||(o="patchjs_shape"+n,el.setAttribute("id",o));const fillMatch=el.style.fill?el.style.fill.match(/^url\(\s*"?\s*#([^\s"]+)"?\s*\)/):null;const attrFillMatch=el.getAttribute('fill')?el.getAttribute('fill').match(/^url\(\s*"?\s*#([^\s"]+)"?\s*\)/):null;const validFillMatch=fillMatch||attrFillMatch;if(validFillMatch&&validFillMatch[1]){const gradNode=root.querySelector('#'+validFillMatch[1]);if(gradNode&&"meshgradient"===gradNode.nodeName.toLowerCase()){try{const bbox=el.getBBox();if(bbox.width===0||bbox.height===0)return;let canvas=document.createElementNS(s,"canvas");d(canvas,{width:bbox.width,height:bbox.height});const ctx=canvas.getContext("2d");let imgData=ctx.createImageData(bbox.width,bbox.height);const mesh=new b(gradNode);"objectBoundingBox"===gradNode.getAttribute("gradientUnits")&&mesh.scale(new x(bbox.width,bbox.height));const trans=gradNode.getAttribute("gradientTransform");null!=trans&&mesh.transform(h(trans));"userSpaceOnUse"===gradNode.getAttribute("gradientUnits")&&mesh.transform(new x(-bbox.x,-bbox.y));mesh.paintMesh(imgData.data,canvas.width);ctx.putImageData(imgData,0,0);const img=document.createElementNS(t,"image");d(img,{width:bbox.width,height:bbox.height,x:bbox.x,y:bbox.y});let dataUrl=canvas.toDataURL();img.setAttributeNS(e,"href",dataUrl);el.parentNode.insertBefore(img,el);if(el.style.fill)el.style.fill="none";if(el.getAttribute('fill'))el.setAttribute('fill','none');const useEl=document.createElementNS(t,"use");useEl.setAttributeNS(e,"href","#"+o);const clipId="patchjs_clip_"+n+"_"+Math.random().toString(36).substr(2,9);const clipPath=document.createElementNS(t,"clipPath");clipPath.setAttribute("id",clipId);clipPath.appendChild(useEl);el.parentElement.insertBefore(clipPath,el);img.setAttribute("clip-path","url(#"+clipId+")");}catch(err){console.warn("Mesh gradient polyfill skipped for",el,err);}}}});
   }
+
   initGlados() {
     const root = this.shadowRoot;
     const config = this.config;
@@ -206,7 +327,6 @@ class GladosCard extends HTMLElement {
     const TALK_MOVES = [{ r: -10, tx: -8, ty: -18, s: 1.02, dur: 1.8, lid: 0.1, px: 0, py: -2 }, { r: 4, tx: 0, ty: 16, s: 1.08, dur: 1.2, lid: 0.85, px: 0, py: 4 }, { r: 2, tx: 0, ty: 10, s: 1.04, dur: 1.0, lid: 0.5, px: 0, py: 2 }, { r: 12, tx: 10, ty: -12, s: 0.96, dur: 2.2, lid: 0.1, px: 0, py: -1 }, { r: 0, tx: 0, ty: 25, s: 1.10, dur: 1.8, lid: 0.9, px: 0, py: 5 }, { r: -6, tx: 6, ty: -22, s: 0.98, dur: 1.0, lid: 0.1, px: 0, py: -3 }, { r: 4, tx: -3, ty: 6, s: 1.03, dur: 2.0, lid: 0.4, px: 0, py: 1 }, { r: -3, tx: 0, ty: 22, s: 1.15, dur: 1.2, lid: 0.95, px: 0, py: 6 }, { r: 6, tx: 3, ty: -6, s: 1.0, dur: 1.5, lid: 0.2, px: 0, py: 0 }];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
-    // ── BOP ANIMATION (Spring Physics — underdamped, natural decay to zero) ──
     this.bopHead = () => {
       if (this._bopping) return;
       this._bopping = true;
@@ -217,12 +337,10 @@ class GladosCard extends HTMLElement {
       const savedLedOpacity = currentLedOpacity;
       const savedBaseLid = currentBaseLid;
 
-      const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.2;
-      const bounces = Math.max(1, Math.min(10, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
+      const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.1;
+      const bounces = Math.max(1, Math.min(20, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
       const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
-      // Underdamped spring: ζ < 1 guarantees oscillation.
-      // bounces = number of FULL cycles (up+down) before decay to ~1%.
       const maxAmp = 15 * intensity;
       const omega = 0.28 * speedMul;
       const dampingRatio = Math.min(0.7, 0.6 / bounces);
@@ -238,12 +356,9 @@ class GladosCard extends HTMLElement {
       const animate = (now) => {
         if (!this._bopping) return;
 
-        // Natural decay: stop only when position AND velocity are negligible.
-        // No hard time cutoff — let it bleed to zero smoothly.
         if (Math.abs(position) < 0.08 && Math.abs(velocity) < 0.08) {
           this._bopping = false;
           this._bopRaf = null;
-          // Gentle final settle — head returns to rest with a soft transition
           el.head.style.transition = 'transform 0.4s ease-out';
           el.head.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
           setLEDs(savedLedColor, savedLedOpacity);
@@ -252,19 +367,16 @@ class GladosCard extends HTMLElement {
           return;
         }
 
-        // Spring physics: F = -kx - cv
         const force = -stiffness * position - damping * velocity;
         velocity += force;
         position += velocity;
 
-        // Smooth per-frame transform (no CSS transition — we handle it every frame)
         const ty = position;
         const rot = position * 0.15;
         const scale = 1.0 - Math.abs(position) * 0.003;
         el.head.style.transition = 'none';
         el.head.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
 
-        // LED pulse: brightest at extremes, dim at center
         if (now - lastLedUpdate > 60) {
           lastLedUpdate = now;
           const normPos = Math.min(1, Math.abs(position) / maxAmp);
@@ -279,11 +391,6 @@ class GladosCard extends HTMLElement {
       this._bopRaf = requestAnimationFrame(animate);
     };
 
-    // ── TAP HANDLER ──
-    // Listen on the host element (this) so clicks work on the Lovelace
-    // dashboard, not just in the editor preview. HA's card wrapper
-    // intercepts SVG-internal clicks, but clicks on the custom element
-    // itself bubble through normally.
     if (this._tapHandler) {
       this.removeEventListener('click', this._tapHandler);
     }
@@ -376,8 +483,8 @@ class GladosCard extends HTMLElement {
     document.addEventListener('visibilitychange', this._boundVisibility);
     this.applyState('idle', 120);
   }
-  disconnectedCallback() { this._cleanupTimers(); }
 }
+
 class GladosCardEditor extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'open' }); this._tapOpen = false; }
   setConfig(config) { this._config = config; }
@@ -402,6 +509,12 @@ class GladosCardEditor extends HTMLElement {
     if (!this._config || !this._hass) return;
     const c = this._config;
     const tapAction = c.tap_action || 'none';
+    
+    // [PATCH]: Inverse Translation Algorithm (Backend to UI)
+    const backendSpeed = c.tap_speed !== undefined ? c.tap_speed : 0.1;
+    let uiValCalc = backendSpeed <= 0.1 ? backendSpeed * 10 : (backendSpeed + 1.8) / 1.9;
+    const uiSpeed = uiValCalc.toFixed(1);
+
     this.shadowRoot.innerHTML = `
       <style>
         .card-config { display: flex; flex-direction: column; gap: 16px; }
@@ -427,41 +540,39 @@ class GladosCardEditor extends HTMLElement {
         <div class="tap-content" id="tap-content">
           <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
           <ha-select outlined label="Tap Action" id="tap-action-select" naturalMenuWidth>
-            <mwc-list-item value="default">Default (Toggle)</mwc-list-item>
-            <mwc-list-item value="more-info">More Info</mwc-list-item>
-            <mwc-list-item value="toggle">Toggle</mwc-list-item>
-            <mwc-list-item value="navigate">Navigate</mwc-list-item>
-            <mwc-list-item value="url">URL</mwc-list-item>
-            <mwc-list-item value="perform-action">Perform Action</mwc-list-item>
-            <mwc-list-item value="assist">Assist</mwc-list-item>
-            <mwc-list-item value="none">Nothing</mwc-list-item>
+            <mwc-list-item value="default" ${tapAction === 'default' ? 'selected' : ''}>Default (Toggle)</mwc-list-item>
+            <mwc-list-item value="more-info" ${tapAction === 'more-info' ? 'selected' : ''}>More Info</mwc-list-item>
+            <mwc-list-item value="toggle" ${tapAction === 'toggle' ? 'selected' : ''}>Toggle</mwc-list-item>
+            <mwc-list-item value="navigate" ${tapAction === 'navigate' ? 'selected' : ''}>Navigate</mwc-list-item>
+            <mwc-list-item value="url" ${tapAction === 'url' ? 'selected' : ''}>URL</mwc-list-item>
+            <mwc-list-item value="perform-action" ${tapAction === 'perform-action' ? 'selected' : ''}>Perform Action</mwc-list-item>
+            <mwc-list-item value="assist" ${tapAction === 'assist' ? 'selected' : ''}>Assist</mwc-list-item>
+            <mwc-list-item value="none" ${tapAction === 'none' ? 'selected' : ''}>Nothing</mwc-list-item>
           </ha-select>
           <div id="nav-path-container" style="display: ${tapAction === 'navigate' ? '' : 'none'}"><paper-input id="nav-path" label="Navigation Path" value="${c.navigation_path || ''}"></paper-input></div>
           <div id="url-path-container" style="display: ${tapAction === 'url' ? '' : 'none'}"><paper-input id="url-path" label="URL" value="${c.url_path || ''}"></paper-input></div>
           <div id="action-path-container" style="display: ${tapAction === 'perform-action' ? '' : 'none'}"><paper-input id="action-path" label="Action (e.g. light.turn_on)" value="${c.action_path || ''}"></paper-input></div>
           <div class="side-by-side">
-            <div><label>Animation Speed: <span id="tap-speed-val">${c.tap_speed !== undefined ? c.tap_speed : 0.2}</span>x</label><div class="secondary">0.05 = very slow, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.05" max="2" step="0.05" pin value="${c.tap_speed !== undefined ? c.tap_speed : 0.2}"></ha-slider></div>
+            <div><label>Animation Speed: <span id="tap-speed-val">${uiSpeed}</span>x</label><div class="secondary">0.1 = very slow, 1.0 = normal, 2.0 = fast.</div><ha-slider id="tap-speed-slider" min="0.1" max="2.0" step="0.1" pin value="${uiSpeed}"></ha-slider></div>
             <div><label>Bop Intensity: <span id="tap-intensity-val">${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}</span>x</label><div class="secondary">How far the head pulls back.</div><ha-slider id="tap-intensity-slider" min="0.5" max="2" step="0.1" pin value="${c.tap_intensity !== undefined ? c.tap_intensity : 1.0}"></ha-slider></div>
           </div>
-          <div><label>Rebound Bounces: <span id="tap-bounces-val">${c.tap_bounces !== undefined ? c.tap_bounces : 5}</span></label><div class="secondary">Full oscillation cycles before settling.</div><ha-slider id="tap-bounces-slider" min="1" max="10" step="1" pin value="${c.tap_bounces !== undefined ? c.tap_bounces : 5}"></ha-slider></div>
+          <div><label>Rebound Bounces: <span id="tap-bounces-val">${c.tap_bounces !== undefined ? c.tap_bounces : 5}</span></label><div class="secondary">Full oscillation cycles before settling.</div><ha-slider id="tap-bounces-slider" min="1" max="20" step="1" pin value="${c.tap_bounces !== undefined ? c.tap_bounces : 5}"></ha-slider></div>
         </div>
       </div>
     `;
-    // Entity pickers
     const ep = this.shadowRoot.querySelector('#entity-picker'); ep.hass = this._hass; ep.value = c.entity; ep.includeDomains = ['assist_satellite'];
     ep.addEventListener('value-changed', (ev) => this.configChanged('entity', ev.detail.value));
     const mp = this.shadowRoot.querySelector('#media-picker'); mp.hass = this._hass; mp.value = c.media_entity; mp.includeDomains = ['media_player'];
     mp.addEventListener('value-changed', (ev) => this.configChanged('media_entity', ev.detail.value));
     const bp = this.shadowRoot.querySelector('#bpm-picker'); bp.hass = this._hass; bp.value = c.bpm_entity; bp.includeDomains = ['sensor'];
     bp.addEventListener('value-changed', (ev) => this.configChanged('bpm_entity', ev.detail.value));
-    // Sliders
     const delaySlider = this.shadowRoot.querySelector('#delay-slider');
     delaySlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#delay-val').innerText = ev.target.value; this.configChanged('respond_delay', Number(ev.target.value)); });
     const zoomSlider = this.shadowRoot.querySelector('#zoom-slider');
     zoomSlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#zoom-val').innerText = ev.target.value; this.configChanged('zoom', Number(ev.target.value)); });
     const bgSwitch = this.shadowRoot.querySelector('#bg-switch'); bgSwitch.checked = c.transparent_bg === true;
     bgSwitch.addEventListener('change', (ev) => this.configChanged('transparent_bg', ev.target.checked));
-    // Tap section toggle
+    
     const tapHeader = this.shadowRoot.querySelector('#tap-header');
     const tapContent = this.shadowRoot.querySelector('#tap-content');
     const tapChevron = this.shadowRoot.querySelector('#tap-chevron');
@@ -471,32 +582,47 @@ class GladosCardEditor extends HTMLElement {
       tapChevron.style.transform = this._tapOpen ? 'rotate(90deg)' : '';
     });
     if (this._tapOpen) { tapContent.classList.add('open'); tapChevron.style.transform = 'rotate(90deg)'; }
-    // Tap config elements
+    
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch'); tapSwitch.checked = c.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => this.configChanged('tap_enabled', ev.target.checked));
+    
     const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
-    requestAnimationFrame(() => { tapActionSelect.value = tapAction; });
-    tapActionSelect.addEventListener('value-changed', (ev) => {
-      const val = ev.detail.value || ev.target.value;
+    
+    tapActionSelect.addEventListener('closed', (ev) => {
+      const val = ev.target.value;
+      if (!val || val === tapAction) return;
       this.configChanged('tap_action', val);
       this.shadowRoot.querySelector('#nav-path-container').style.display = val === 'navigate' ? '' : 'none';
       this.shadowRoot.querySelector('#url-path-container').style.display = val === 'url' ? '' : 'none';
       this.shadowRoot.querySelector('#action-path-container').style.display = val === 'perform-action' ? '' : 'none';
     });
+
     const navPath = this.shadowRoot.querySelector('#nav-path');
     if (navPath) navPath.addEventListener('change', (ev) => this.configChanged('navigation_path', ev.target.value));
     const urlPath = this.shadowRoot.querySelector('#url-path');
     if (urlPath) urlPath.addEventListener('change', (ev) => this.configChanged('url_path', ev.target.value));
     const actionPath = this.shadowRoot.querySelector('#action-path');
     if (actionPath) actionPath.addEventListener('change', (ev) => this.configChanged('action_path', ev.target.value));
+    
     const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
-    tapSpeedSlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#tap-speed-val').innerText = ev.target.value; this.configChanged('tap_speed', Number(ev.target.value)); });
+    
+    // [PATCH]: Forward Translation Algorithm (UI to Backend)
+    tapSpeedSlider.addEventListener('change', (ev) => { 
+      const uiVal = Number(ev.target.value);
+      this.shadowRoot.querySelector('#tap-speed-val').innerText = uiVal.toFixed(1); 
+      
+      let backendVal = uiVal <= 1.0 ? uiVal / 10 : (1.9 * uiVal) - 1.8;
+      this.configChanged('tap_speed', Number(backendVal.toFixed(3))); 
+    });
+    
     const tapIntensitySlider = this.shadowRoot.querySelector('#tap-intensity-slider');
     tapIntensitySlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#tap-intensity-val').innerText = ev.target.value; this.configChanged('tap_intensity', Number(ev.target.value)); });
+    
     const tapBouncesSlider = this.shadowRoot.querySelector('#tap-bounces-slider');
     tapBouncesSlider.addEventListener('change', (ev) => { this.shadowRoot.querySelector('#tap-bounces-val').innerText = ev.target.value; this.configChanged('tap_bounces', Number(ev.target.value)); });
   }
 }
+
 customElements.define('glados-card-editor', GladosCardEditor);
 customElements.define('glados-card', GladosCard);
 window.customCards = window.customCards || [];
