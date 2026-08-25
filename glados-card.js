@@ -7,7 +7,7 @@ class GladosCard extends HTMLElement {
     this._lastHassBpm = null;
   }
   static getConfigElement() { return document.createElement('glados-card-editor'); }
-  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 1.0, tap_bounces: 2 }; }
+  static getStubConfig() { return { entity: "", media_entity: "", bpm_entity: "", respond_delay: 0, zoom: 85, transparent_bg: false, tap_enabled: true, tap_speed: 1.0, tap_bounces: 4, tap_intensity: 1.0, tap_action: "none" }; }
   setConfig(config) {
     if (!config.entity && !this.config) {
       this.config = { ...config, entity: 'assist_satellite.example' };
@@ -23,6 +23,7 @@ class GladosCard extends HTMLElement {
   }
   set hass(hass) {
     if (!hass) return;
+    this._hass = hass;
     if (!this.contentReady) {
       this.setupDOM();
       this.initGlados();
@@ -60,7 +61,7 @@ class GladosCard extends HTMLElement {
     if (this.pupilTimer) { clearTimeout(this.pupilTimer); this.pupilTimer = null; }
     if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
     if (this.glitchRaf) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; }
-    if (this._bopTimers) { this._bopTimers.forEach(t => clearTimeout(t)); this._bopTimers = null; }
+    if (this._bopRaf) { cancelAnimationFrame(this._bopRaf); this._bopRaf = null; }
     this._bopping = false;
     if (this._boundVisibility) {
       document.removeEventListener('visibilitychange', this._boundVisibility);
@@ -575,7 +576,7 @@ class GladosCard extends HTMLElement {
     this.lidTimer = null; this.idleTimer = null; this.pupilTimer = null;
     this.glitchRaf = null; this.danceTimer = null; this.danceLedTimer = null;
     this.talkAnim = null; this.respondTimer = null;
-    this._bopTimers = null; this._bopping = false;
+    this._bopRaf = null; this._bopping = false;
     const startLidBehavior = () => {
       if (this.lidTimer) clearTimeout(this.lidTimer);
       const loop = () => {
@@ -665,78 +666,76 @@ class GladosCard extends HTMLElement {
     ];
     const startTalkAnim = () => { if (this.talkAnim) clearTimeout(this.talkAnim); let talkPhase = 0; const step = () => { const m = TALK_MOVES[talkPhase % TALK_MOVES.length]; setHead(m.r, m.tx, m.ty, m.s, m.dur, "ease-in-out"); setLid(m.lid, m.dur); setPupil(m.px, m.py); setBodySwivel(m.r * -0.6, 1, m.dur); talkPhase++; this.talkAnim = setTimeout(step, m.dur * 1000); }; step(); };
 
-    // ── BOP ANIMATION ──
-    // Gentle head bop with configurable speed and bounce count.
-    // LED vents pulse on impact, fade back to normal on settle.
+    // ── BOP ANIMATION (Spring Physics) ──
+    // Smooth damped harmonic oscillator for natural bobble-head motion.
     this.bopHead = () => {
       if (this._bopping) return;
       this._bopping = true;
       this.stopIdleCycle();
       stopLidBehavior();
 
-      // Save LED state BEFORE bop so we can restore it correctly
       const savedLedColor = currentLedColor;
       const savedLedOpacity = currentLedOpacity;
+      const savedBaseLid = currentBaseLid;
 
       const speedMul = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 1.0;
-      const bounces = Math.max(1, Math.min(5, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 2));
+      const bounces = Math.max(1, Math.min(10, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 4));
+      const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
 
-      // Gentle pullback parameters
-      const pullback = 10;
-      const shrink = 0.95;
+      const maxPullback = 15 * intensity;
+      const damping = 0.40 + (bounces / 10) * 0.50; // More bounces = less damping
+      const stiffness = 0.06 * speedMul; // Higher speed = faster oscillation
 
-      this._bopTimers = [];
+      let position = 0;
+      let velocity = maxPullback * stiffness * 2; // Initial impulse
 
-      // Phase 1: Gentle pull back
-      setHead(-1.5, 0, -pullback, shrink, 0.2 * speedMul, "ease-out");
-      setLEDs(savedLedColor, '0.7');
-      setLid(0.25, 0.2 * speedMul);
+      if (this._bopRaf) cancelAnimationFrame(this._bopRaf);
+      let startTime = performance.now();
+      let lastLedUpdate = 0;
 
-      let t = 200 * speedMul;
+      const animate = (now) => {
+        if (!this._bopping) return;
+        const elapsed = now - startTime;
 
-      // Bounce phases with exponential decay
-      for (let i = 0; i < bounces; i++) {
-        const decay = Math.pow(0.5, i);
-        const fwdAmp = pullback * decay * 0.5;
-        const backAmp = pullback * decay * 0.25;
-        const rot = (i % 2 === 0 ? 1.5 : -1.5) * decay;
-        const scaleOvershoot = 1.0 + decay * 0.03;
-
-        const fwdDur = (0.3 + i * 0.05) * speedMul;
-        const backDur = fwdDur * 0.6;
-
-        // Forward swing (overshoot past neutral)
-        this._bopTimers.push(setTimeout(() => {
-          setHead(rot, 0, fwdAmp, scaleOvershoot, fwdDur, "cubic-bezier(0.34, 1.3, 0.64, 1)");
-          setLid(0, fwdDur * 0.5);
-        }, t));
-        t += fwdDur * 1000;
-
-        // Back swing (smaller, except after last bounce — settle instead)
-        if (i < bounces - 1) {
-          this._bopTimers.push(setTimeout(() => {
-            setHead(-rot * 0.4, 0, -backAmp, 1.0 - decay * 0.015, backDur, "ease-out");
-          }, t));
-          t += backDur * 1000;
+        // Stop when settled
+        if (elapsed > 8000 || (Math.abs(position) < 0.1 && Math.abs(velocity) < 0.1 && elapsed > 300)) {
+          this._bopping = false;
+          this._bopRaf = null;
+          setHead(0, 0, 0, 1.0, 0.3, "ease-out");
+          setLEDs(savedLedColor, savedLedOpacity);
+          setLid(savedBaseLid, 0.3);
+          if (stateNow === 'idle') {
+            startLidBehavior();
+            this.startIdleCycle();
+          }
+          return;
         }
-      }
 
-      // Final settle to neutral + restore LEDs
-      const settleDur = 0.35 * speedMul;
-      this._bopTimers.push(setTimeout(() => {
-        setHead(0, 0, 0, 1.0, settleDur, "ease-in-out");
-        setLEDs(savedLedColor, savedLedOpacity);
-      }, t));
-      t += settleDur * 1000;
+        // Spring physics step
+        const force = -stiffness * position - damping * velocity;
+        velocity += force;
+        position += velocity;
 
-      // Resume idle behavior after settle
-      this._bopTimers.push(setTimeout(() => {
-        this._bopping = false;
-        if (stateNow === 'idle') {
-          startLidBehavior();
-          this.startIdleCycle();
+        // Apply transforms smoothly (no CSS transition, we handle it per-frame)
+        const ty = position;
+        const rot = position * 0.12;
+        const scale = 1.0 - Math.abs(position) * 0.002;
+        el.head.style.transition = 'none';
+        el.head.style.transform = `translate3d(0, ${ty}px, 0) rotate(${rot}deg) scale(${scale})`;
+
+        // LED pulse: brightest at extremes, dim at center
+        if (now - lastLedUpdate > 80) {
+          lastLedUpdate = now;
+          const normPos = Math.min(1, Math.abs(position) / maxPullback);
+          const baseOpacity = parseFloat(savedLedOpacity);
+          const ledOpacity = baseOpacity + (1 - baseOpacity) * normPos;
+          el.svg.style.setProperty('--led-color', savedLedColor);
+          el.svg.style.setProperty('--led-opacity', ledOpacity.toFixed(2));
         }
-      }, t + 100));
+
+        this._bopRaf = requestAnimationFrame(animate);
+      };
+      this._bopRaf = requestAnimationFrame(animate);
     };
 
     // ── TAP HANDLER ──
@@ -747,6 +746,24 @@ class GladosCard extends HTMLElement {
       if (this.config.tap_enabled === false) return;
       e.stopPropagation();
       this.bopHead();
+      
+      const action = this.config.tap_action || 'none';
+      if (action === 'none' || action === 'default') return;
+      
+      if (action === 'more-info') {
+        fireEvent(this, 'hass-more-info', { entityId: this.config.entity });
+      } else if (action === 'toggle') {
+        if (this._hass && this.config.entity) {
+          this._hass.callService('homeassistant', 'toggle', { entity_id: this.config.entity });
+        }
+      } else if (action === 'navigate' && this.config.navigation_path) {
+        window.history.pushState(null, '', this.config.navigation_path);
+        fireEvent(window, 'location-changed', { replace: false });
+      } else if (action === 'url' && this.config.url_path) {
+        window.open(this.config.url_path, '_blank');
+      } else if (action === 'assist') {
+        fireEvent(this, 'hass-assist');
+      }
     };
     if (this.config.tap_enabled !== false) {
       el.svg.style.cursor = 'pointer';
@@ -759,7 +776,7 @@ class GladosCard extends HTMLElement {
       stopLidBehavior();
       this.stopIdleCycle();
       this.stopDanceCycle();
-      if (this._bopTimers) { this._bopTimers.forEach(t => clearTimeout(t)); this._bopTimers = null; }
+      if (this._bopRaf) { cancelAnimationFrame(this._bopRaf); this._bopRaf = null; }
       this._bopping = false;
       el.ledMatrices.forEach(m => m.classList.remove('pulsing'));
       if (el.dangerRing) el.dangerRing.setAttribute('opacity', '0');
@@ -793,9 +810,7 @@ class GladosCard extends HTMLElement {
       this._lastEffectiveState = mapped; animateGlaDOS(mapped, bpm);
     };
 
-    // ── Visibility handler: pause on hidden, resume on visible ──
-    // CRITICAL: Do NOT call _cleanupTimers() here — that would remove
-    // this event listener. Only stop specific timers manually.
+    // ── Visibility handler ──
     this._visibilityHandler = () => {
       if (!this.isConnected) return;
       if (document.hidden) {
@@ -804,7 +819,7 @@ class GladosCard extends HTMLElement {
         if (this.lidTimer) { clearTimeout(this.lidTimer); this.lidTimer = null; }
         if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
         if (this.respondTimer) { clearTimeout(this.respondTimer); this.respondTimer = null; }
-        if (this._bopTimers) { this._bopTimers.forEach(t => clearTimeout(t)); this._bopTimers = null; }
+        if (this._bopRaf) { cancelAnimationFrame(this._bopRaf); this._bopRaf = null; }
         this._bopping = false;
         el.svg.style.animationPlayState = 'paused';
         const animatedEls = el.svg.querySelectorAll('#body-pivot, #head-sway-pivot');
@@ -841,6 +856,7 @@ class GladosCardEditor extends HTMLElement {
   }
   render() {
     if (!this._config || !this._hass) return;
+    const tapAction = this._config.tap_action || 'none';
     this.shadowRoot.innerHTML = `
       <style>
         .card-config { display: flex; flex-direction: column; gap: 16px; }
@@ -848,6 +864,11 @@ class GladosCardEditor extends HTMLElement {
         .side-by-side > div { flex: 1; display: flex; flex-direction: column; }
         label { font-family: var(--paper-font-body1_-_font-family, sans-serif); font-size: 14px; color: var(--primary-text-color); }
         .secondary { font-size: 12px; color: var(--secondary-text-color); margin-top: 2px; }
+        details { margin-top: 8px; border-top: 1px solid var(--divider-color, #e0e0e0); padding-top: 8px; }
+        summary { font-family: var(--paper-font-body1_-_font-family, sans-serif); font-size: 14px; font-weight: 500; color: var(--primary-text-color); cursor: pointer; padding: 8px 0; outline: none; }
+        details[open] summary { padding-bottom: 12px; }
+        .tap-config { display: flex; flex-direction: column; gap: 16px; padding-top: 8px; }
+        .nav-path { margin-top: 8px; }
       </style>
       <div class="card-config">
         <ha-entity-picker id="entity-picker" label="Voice Assistant Entity (Required)" allow-custom-entity></ha-entity-picker>
@@ -864,20 +885,49 @@ class GladosCardEditor extends HTMLElement {
             <ha-slider id="zoom-slider" min="10" max="200" step="1" pin value="${this._config.zoom !== undefined ? this._config.zoom : 85}"></ha-slider>
           </div>
         </div>
-        <div class="side-by-side">
-          <div>
-            <label>Tap Speed: <span id="tap-speed-val">${this._config.tap_speed !== undefined ? this._config.tap_speed : 1.0}</span>x</label>
-            <div class="secondary">0.5 = slow/gentle, 2.0 = fast/snappy.</div>
-            <ha-slider id="tap-speed-slider" min="0.5" max="2" step="0.1" pin value="${this._config.tap_speed !== undefined ? this._config.tap_speed : 1.0}"></ha-slider>
-          </div>
-          <div>
-            <label>Rebound Bounces: <span id="tap-bounces-val">${this._config.tap_bounces !== undefined ? this._config.tap_bounces : 2}</span></label>
-            <div class="secondary">Number of times the head swings back.</div>
-            <ha-slider id="tap-bounces-slider" min="1" max="5" step="1" pin value="${this._config.tap_bounces !== undefined ? this._config.tap_bounces : 2}"></ha-slider>
-          </div>
-        </div>
         <ha-formfield label="Transparent Background"><ha-switch id="bg-switch"></ha-switch></ha-formfield>
-        <ha-formfield label="Enable Tap to Bop"><ha-switch id="tap-switch"></ha-switch></ha-formfield>
+        
+        <details>
+          <summary>Tap / Press</summary>
+          <div class="tap-config">
+            <ha-formfield label="Enable Tap to Bop">
+              <ha-switch id="tap-switch" ?checked="${this._config.tap_enabled !== false}"></ha-switch>
+            </ha-formfield>
+            
+            <ha-select outlined label="Tap Action" id="tap-action-select" naturalMenuWidth value="${tapAction}">
+              <mwc-list-item value="default">Default (Toggle)</mwc-list-item>
+              <mwc-list-item value="more-info">More Info</mwc-list-item>
+              <mwc-list-item value="toggle">Toggle</mwc-list-item>
+              <mwc-list-item value="navigate">Navigate</mwc-list-item>
+              <mwc-list-item value="url">URL</mwc-list-item>
+              <mwc-list-item value="perform-action">Perform Action</mwc-list-item>
+              <mwc-list-item value="assist">Assist</mwc-list-item>
+              <mwc-list-item value="none">Nothing</mwc-list-item>
+            </ha-select>
+
+            ${tapAction === 'navigate' ? `<paper-input class="nav-path" id="nav-path" label="Navigation Path" value="${this._config.navigation_path || ''}"></paper-input>` : ''}
+            ${tapAction === 'url' ? `<paper-input class="nav-path" id="url-path" label="URL Path" value="${this._config.url_path || ''}"></paper-input>` : ''}
+
+            <div class="side-by-side">
+              <div>
+                <label>Animation Speed: <span id="tap-speed-val">${this._config.tap_speed !== undefined ? this._config.tap_speed : 1.0}</span>x</label>
+                <div class="secondary">0.5 = slow, 2.0 = fast.</div>
+                <ha-slider id="tap-speed-slider" min="0.5" max="2" step="0.1" pin value="${this._config.tap_speed !== undefined ? this._config.tap_speed : 1.0}"></ha-slider>
+              </div>
+              <div>
+                <label>Bop Intensity: <span id="tap-intensity-val">${this._config.tap_intensity !== undefined ? this._config.tap_intensity : 1.0}</span>x</label>
+                <div class="secondary">How far the head pulls back.</div>
+                <ha-slider id="tap-intensity-slider" min="0.5" max="2" step="0.1" pin value="${this._config.tap_intensity !== undefined ? this._config.tap_intensity : 1.0}"></ha-slider>
+              </div>
+            </div>
+            
+            <div>
+              <label>Rebound Bounces: <span id="tap-bounces-val">${this._config.tap_bounces !== undefined ? this._config.tap_bounces : 4}</span></label>
+              <div class="secondary">Number of times the head swings back.</div>
+              <ha-slider id="tap-bounces-slider" min="1" max="10" step="1" pin value="${this._config.tap_bounces !== undefined ? this._config.tap_bounces : 4}"></ha-slider>
+            </div>
+          </div>
+        </details>
       </div>
     `;
     const entityPicker = this.shadowRoot.querySelector('#entity-picker');
@@ -895,18 +945,36 @@ class GladosCardEditor extends HTMLElement {
     const zoomSlider = this.shadowRoot.querySelector('#zoom-slider');
     const zoomVal = this.shadowRoot.querySelector('#zoom-val');
     zoomSlider.addEventListener('change', (ev) => { zoomVal.innerText = ev.target.value; this.configChanged('zoom', Number(ev.target.value)); });
-    const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
-    const tapSpeedVal = this.shadowRoot.querySelector('#tap-speed-val');
-    tapSpeedSlider.addEventListener('change', (ev) => { tapSpeedVal.innerText = ev.target.value; this.configChanged('tap_speed', Number(ev.target.value)); });
-    const tapBouncesSlider = this.shadowRoot.querySelector('#tap-bounces-slider');
-    const tapBouncesVal = this.shadowRoot.querySelector('#tap-bounces-val');
-    tapBouncesSlider.addEventListener('change', (ev) => { tapBouncesVal.innerText = ev.target.value; this.configChanged('tap_bounces', Number(ev.target.value)); });
     const bgSwitch = this.shadowRoot.querySelector('#bg-switch');
     bgSwitch.checked = this._config.transparent_bg === true;
     bgSwitch.addEventListener('change', (ev) => { this.configChanged('transparent_bg', ev.target.checked); });
+
     const tapSwitch = this.shadowRoot.querySelector('#tap-switch');
-    tapSwitch.checked = this._config.tap_enabled !== false;
     tapSwitch.addEventListener('change', (ev) => { this.configChanged('tap_enabled', ev.target.checked); });
+
+    const tapActionSelect = this.shadowRoot.querySelector('#tap-action-select');
+    tapActionSelect.addEventListener('value-changed', (ev) => { this.configChanged('tap_action', ev.target.value); this.render(); });
+
+    const navPath = this.shadowRoot.querySelector('#nav-path');
+    if (navPath) {
+      navPath.addEventListener('change', (ev) => { this.configChanged('navigation_path', ev.target.value); });
+    }
+    const urlPath = this.shadowRoot.querySelector('#url-path');
+    if (urlPath) {
+      urlPath.addEventListener('change', (ev) => { this.configChanged('url_path', ev.target.value); });
+    }
+
+    const tapSpeedSlider = this.shadowRoot.querySelector('#tap-speed-slider');
+    const tapSpeedVal = this.shadowRoot.querySelector('#tap-speed-val');
+    tapSpeedSlider.addEventListener('change', (ev) => { tapSpeedVal.innerText = ev.target.value; this.configChanged('tap_speed', Number(ev.target.value)); });
+
+    const tapIntensitySlider = this.shadowRoot.querySelector('#tap-intensity-slider');
+    const tapIntensityVal = this.shadowRoot.querySelector('#tap-intensity-val');
+    tapIntensitySlider.addEventListener('change', (ev) => { tapIntensityVal.innerText = ev.target.value; this.configChanged('tap_intensity', Number(ev.target.value)); });
+
+    const tapBouncesSlider = this.shadowRoot.querySelector('#tap-bounces-slider');
+    const tapBouncesVal = this.shadowRoot.querySelector('#tap-bounces-val');
+    tapBouncesSlider.addEventListener('change', (ev) => { tapBouncesVal.innerText = ev.target.value; this.configChanged('tap_bounces', Number(ev.target.value)); });
   }
 }
 customElements.define('glados-card-editor', GladosCardEditor);
