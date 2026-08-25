@@ -60,7 +60,6 @@ class GladosCard extends HTMLElement {
     if (this.pupilTimer) { clearTimeout(this.pupilTimer); this.pupilTimer = null; }
     if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
     if (this.glitchRaf) { cancelAnimationFrame(this.glitchRaf); this.glitchRaf = null; }
-    if (this._watchdogTimer) { clearTimeout(this._watchdogTimer); this._watchdogTimer = null; }
     if (this._boundVisibility) {
       document.removeEventListener('visibilitychange', this._boundVisibility);
       this._boundVisibility = null;
@@ -79,17 +78,21 @@ class GladosCard extends HTMLElement {
         #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; --led-color: #ffb800; --led-opacity: 0.15; }
         .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: fill 0.2s, opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
 
-        /* TABLET GPU OPTIMIZATION: Only promote the two top-level animated pivots.
-           Children inherit the parent's compositor layer; adding will-change to
-           all of them forces 8 separate GPU textures + 3 more for the SVG blur
-           filters = compositor memory exhaustion on tablets after hours of uptime. */
-        #body-pivot, #head-sway-pivot { will-change: transform; }
-        #glados-head, #eyeball-assembly, #eye-pupil, #bellows, #eye-lid, #eye-lid-bottom { will-change: auto; }
+        /* GPU LAYER STRATEGY: Only 3 compositor-promoted elements.
+           #body-pivot and #head-sway-pivot run CSS ambient animations.
+           #torso is the JS-driven swivel target (decoupled from #body-pivot
+           so setBodySwivel never destroys the CSS body-sway animation). */
+        #body-pivot, #head-sway-pivot, #torso { will-change: transform; }
 
         #body-pivot { transform-origin: 140px 116px; animation: body-sway 8s ease-in-out infinite; }
         @keyframes body-sway { 0%, 100% { transform: rotate(-1.4deg); } 50% { transform: rotate( 1.4deg); } }
         #head-sway-pivot { transform-origin: 140px 285px; animation: head-ambient-sway 13s ease-in-out infinite; }
         @keyframes head-ambient-sway { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
+
+        /* DECOUPLED JS TARGET: #torso handles JS swivel independently.
+           #body-pivot's CSS animation is never touched by JS. */
+        #torso { transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); transform-origin: 140px 116px; }
+
         #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
         #eye-halo, #eye-center { transition: fill 0.8s ease-in-out; }
         .eye-layer { transition: opacity 0.8s ease-in-out; }
@@ -145,16 +148,16 @@ class GladosCard extends HTMLElement {
             <radialGradient id="eyeGradDance" cx="50%" cy="50%" r="50%">
               <stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#aaffaa"/><stop offset="55%" stop-color="#1DB954"/><stop offset="80%" stop-color="#0a5926"/><stop offset="100%" stop-color="#001a00"/>
             </radialGradient>
-            <filter id="eyeBloom" x="-120%" y="-120%" width="340%" height="340%">
-              <feGaussianBlur stdDeviation="10" result="b"/>
+            <filter id="eyeBloom" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="6" result="b"/>
               <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
             <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
               <feGaussianBlur stdDeviation="2" result="b"/>
               <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
-            <filter id="ledGlow" x="-60%" y="-60%" width="220%" height="220%">
-              <feGaussianBlur stdDeviation="2.5" result="b"/>
+            <filter id="ledGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="2" result="b"/>
               <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
             </filter>
 
@@ -506,7 +509,7 @@ class GladosCard extends HTMLElement {
                         <circle id="indicator-dot" cx="147" cy="388" r="2.5" fill="#ff2200" opacity="0.8" filter="url(#softGlow)"/>
                         <circle id="eye-halo" cx="130" cy="364" r="25" fill="#330800" opacity=".05" filter="url(#eyeBloom)"/>
 
-                        <g id="eye-pupil">
+                        <g id="eye-pupil" style="transition: transform 0.15s ease-out;">
                           <circle id="eye-layer-idle" cx="130" cy="364" r="17.6" fill="url(#eyeGradIdle)" filter="url(#softGlow)" class="eye-layer" opacity="1" />
                           <circle id="eye-layer-listen" cx="130" cy="364" r="17.6" fill="url(#eyeGradListen)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
                           <circle id="eye-layer-process" cx="130" cy="364" r="17.6" fill="url(#eyeGradProcess)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
@@ -596,8 +599,7 @@ class GladosCard extends HTMLElement {
     const el = {
       svg: root.getElementById('glados-svg'),
       head: root.getElementById('glados-head'),
-      bodyPivot: root.getElementById('body-pivot'),
-      headSwayPivot: root.getElementById('head-sway-pivot'),
+      torso: root.getElementById('torso'),
       eyeLayerIdle: root.getElementById('eye-layer-idle'),
       eyeLayerListen: root.getElementById('eye-layer-listen'),
       eyeLayerProcess: root.getElementById('eye-layer-process'),
@@ -620,14 +622,12 @@ class GladosCard extends HTMLElement {
       el.head.style.transform = `translate3d(${tx}px,${ty}px,0) rotate(${rot}deg) scale(${scale})`;
     }
     function setBodySwivel(rot, sx, dur) {
-      el.bodyPivot.style.transition = `transform ${dur || 2.0}s cubic-bezier(0.45,0.05,0.55,0.95)`;
-      el.bodyPivot.style.animation = 'none';
-      el.bodyPivot.style.transform = `translate3d(0,0,0) rotate(${rot}deg) scaleX(${sx || 1})`;
+      el.torso.style.transition = `transform ${dur || 2.0}s cubic-bezier(0.45,0.05,0.55,0.95)`;
+      el.torso.style.transform = `matrix(1.2,0,0,1.2,-28,-23.2) rotate(${rot}deg) scaleX(${sx || 1})`;
     }
     function resetBodySwivel() {
-      el.bodyPivot.style.transition = '';
-      el.bodyPivot.style.animation = '';
-      el.bodyPivot.style.transform = '';
+      el.torso.style.transition = `transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95)`;
+      el.torso.style.transform = `matrix(1.2,0,0,1.2,-28,-23.2)`;
     }
     function setLid(amount, dur = 0.7) {
       const px = amount * 17;
@@ -720,7 +720,7 @@ class GladosCard extends HTMLElement {
       if (stateNow !== 'idle') return;
       let r = Math.random() * IDLE_BEHAVIORS.reduce((s, b) => s + b.weight, 0), chosen = IDLE_BEHAVIORS[0];
       for (const b of IDLE_BEHAVIORS) { r -= b.weight; if (r <= 0) { chosen = b; break; } }
-      chosen.exec();
+      try { chosen.exec(); } catch(err) {}
       this.idleTimer = setTimeout(runNextIdleBehavior, chosen.min + Math.random() * (chosen.max - chosen.min));
     };
     this.startIdleCycle = () => {
@@ -777,12 +777,10 @@ class GladosCard extends HTMLElement {
         const executeTick = () => {
           dancePhase++;
           const now = performance.now();
-          expectedNextTick += beatMs;
-          // If we've fallen behind by more than 4 beats, snap forward
-          // instead of firing a burst of 0-delay callbacks that hammer the GPU
-          const drift = now - expectedNextTick;
-          if (drift > beatMs * 4) {
-            expectedNextTick = now + beatMs;
+          if (now > expectedNextTick + beatMs) {
+            expectedNextTick = now;
+          } else {
+            expectedNextTick += beatMs;
           }
           const delay = Math.max(0, expectedNextTick - now);
           this.danceTimer = setTimeout(step, delay);
@@ -966,16 +964,17 @@ class GladosCard extends HTMLElement {
       animateGlaDOS(mapped, bpm);
     };
 
-    // ── Pause animations when the page is hidden, resume when visible ──
-    // Tablet WebViews fire visibilitychange when the screen dims or the
-    // app goes to background. Without this, timers keep running in a
-    // throttled state and desync.
+    // ── Visibility handler: pause on hidden, resume on visible ──
+    // CRITICAL: Do NOT call _cleanupTimers() here — that would remove
+    // this very event listener, making the resume branch unreachable.
+    // Only stop specific animation timers; keep the listener alive.
     this._visibilityHandler = () => {
       if (document.hidden) {
         this.stopIdleCycle();
         this.stopDanceCycle();
         if (this.lidTimer) { clearTimeout(this.lidTimer); this.lidTimer = null; }
         if (this.talkAnim) { clearTimeout(this.talkAnim); this.talkAnim = null; }
+        if (this.respondTimer) { clearTimeout(this.respondTimer); this.respondTimer = null; }
         el.svg.style.animationPlayState = 'paused';
         const animatedEls = el.svg.querySelectorAll('#body-pivot, #head-sway-pivot');
         animatedEls.forEach(e => { e.style.animationPlayState = 'paused'; });
@@ -991,30 +990,6 @@ class GladosCard extends HTMLElement {
     if (this._boundVisibility) document.removeEventListener('visibilitychange', this._boundVisibility);
     this._boundVisibility = this._visibilityHandler;
     document.addEventListener('visibilitychange', this._boundVisibility);
-
-    // ── Watchdog: every 60s, check if CSS animations are still running ──
-    // If the compositor has silently died (GPU layer exhaustion), the
-    // CSS animation's computed transform won't change between checks.
-    // We detect this and force a layer reset.
-    if (this._watchdogTimer) clearTimeout(this._watchdogTimer);
-    let lastBodyTransform = '';
-    const watchdog = () => {
-      if (!document.hidden && this.isConnected) {
-        const currentTransform = window.getComputedStyle(el.bodyPivot).transform;
-        if (currentTransform === lastBodyTransform && lastBodyTransform !== '' && stateNow !== 'responding') {
-          // CSS animation appears frozen — kick the compositor
-          el.bodyPivot.style.animation = 'none';
-          void el.bodyPivot.offsetWidth;  // force reflow
-          el.bodyPivot.style.animation = '';
-          el.headSwayPivot.style.animation = 'none';
-          void el.headSwayPivot.offsetWidth;
-          el.headSwayPivot.style.animation = '';
-        }
-        lastBodyTransform = currentTransform;
-      }
-      this._watchdogTimer = setTimeout(watchdog, 60000);
-    };
-    watchdog();
 
     this.applyState('idle', 120);
   }
