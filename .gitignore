@@ -1,0 +1,7 @@
+# AI context — never committed
+memory-bank/
+plans/
+
+# Node / build
+node_modules/
+package-lock.json

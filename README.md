@@ -10,7 +10,7 @@ She tracks your voice assistant's state in real-time, features a randomized idle
 
 * **Real-time State Tracking:** Seamlessly transitions between Idle, Listening (Blue), Processing (Orange/Pulsing), and Responding (Red/Talking).
 * **Organic Idle Engine:** Uses a weighted randomizer to cycle through various idle animations (swaying, looking around, glitching, getting bored) so she never looks robotic or looped.
-* **Performance Optimized:** Uses GPU-accelerated CSS `transform` and `opacity` properties. Internal state-caching and garbage collection ensure zero memory leaks and negligible CPU drain.
+* **Performance Optimized:** Uses GPU-accelerated CSS `transform` and `opacity` properties, with bloom effects pre-baked as SVG gradients instead of runtime filters. Internal state-caching and garbage collection ensure zero memory leaks and negligible CPU drain.
 * **Visual UI Editor:** Fully supports Home Assistant's visual card editor. No YAML configuration required!
 * **Response Delay Timer:** Configurable delay to keep her in the "Processing" state a little longer before she starts talking, giving your TTS engine time to catch up.
 
@@ -58,6 +58,8 @@ media_entity: media_player.spotify
 bpm_entity: sensor.universal_music_bpm
 respond_delay: 2.5
 zoom: 85 # Scale percentage of the SVG model inside the card. Default is 85.
+tap_action:
+  action: more-info # Standard HA action: more-info, toggle, navigate, call-service, etc.
 ```
 
 ## Configuration Variables
@@ -70,8 +72,43 @@ zoom: 85 # Scale percentage of the SVG model inside the card. Default is 85.
 | `bpm_entity` | string | Optional | The entity ID of the sensor providing the current song's BPM (requires [SongBPM-26](https://github.com/adix992/SongBPM-26)). Defaults to 120 if missing. |
 | `respond_delay` | number | Optional | Number of seconds to wait before changing from Processing (Orange) to Responding (Red). Useful if your TTS has a slight delay. Default is `0`. |
 | `zoom` | number | Optional | Scale percentage of the SVG model inside the card. Default is `85`. |
+| `transparent_bg` | boolean | Optional | Removes the card background, shadow, and border. Default is `false`. |
+| `tap_enabled` | boolean | Optional | Enables the tap-to-bop interaction. Default is `true`. |
+| `tap_action` | object | Optional | Standard HA action (`more-info`, `toggle`, `navigate`, `call-service`, etc.) fired on tap. Default is `{action: "none"}`. |
+| `tap_speed` | number | Optional | Bop animation speed, `0.1` (slow) – `2.0` (fast). Default is `0.5`. |
+| `tap_bounces` | number | Optional | Rebound oscillations before settling, `1`–`20`. Default is `5`. |
+| `tap_intensity` | number | Optional | How far the head pulls back, `0.5`–`2`. Default is `1.0`. |
 
-## 🛠️ Tech Stack & Optimization
+## 🧑‍💻 Development
+
+The card source lives in small, focused ES modules under `src/` and is bundled into the single `glados-card.js` file that HACS distributes.
+
+| Module | Responsibility |
+| :--- | :--- |
+| `src/index.js` | Entry point: custom element registration + card picker entry |
+| `src/glados-card.js` | Card lifecycle, config, hass state diffing, tap handlers |
+| `src/editor.js` | Visual config editor |
+| `src/config.js` | Config sanitization/clamping (pure functions) |
+| `src/state-mapper.js` | Voice/media/BPM state mapping (pure functions) |
+| `src/template.js` | CSS + inline SVG markup (the GLaDOS model artwork) |
+| `src/animator.js` | Element refs, motion primitives, timer/RAF registry |
+| `src/states.js` | Per-state visual setup (idle/dancing/listening/processing/responding) |
+| `src/behaviors/idle.js` | Weighted idle behaviors, lid loop, pupil darting |
+| `src/behaviors/dance.js` | BPM-synced choreography engine |
+| `src/behaviors/talk.js` | Responding-state talk animation |
+| `src/behaviors/bop.js` | Spring-physics tap bop |
+
+### Building
+
+```bash
+npm install
+npm run build    # bundles src/ -> glados-card.js
+npm run verify   # build + syntax check
+```
+
+A GitHub Actions workflow automatically rebuilds `glados-card.js` on every push to `main`, so the committed bundle always matches the source. When contributing, edit files under `src/` only — never hand-edit `glados-card.js`.
+
+## �️ Tech Stack & Optimization
 
 This card is completely self-contained. It uses no external image files (everything is dynamically drawn via inline SVG), and all lighting blooms, shadows, and metallic reflections are calculated natively by the browser's SVG rendering engine.
 
