@@ -68,9 +68,16 @@ export function startDanceCycle(card, bpm) {
     let frameTime = now - lastGrooveTime;
     lastGrooveTime = now;
     if (frameTime > 100) frameTime = 16.666;
-    groove.step(frameTime);
-    if (a.el.headGroove) {
-      a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+    // Bop hold: freeze the groove layer entirely — no physics steps, no
+    // transform writes — so the residual bob doesn't keep animating the
+    // head while the tap bop owns it. The RAF stays alive (just updating
+    // lastGrooveTime) so releasing the hold needs no loop restart and the
+    // spring resumes from exactly where it froze.
+    if (!card._danceHeld) {
+      groove.step(frameTime);
+      if (a.el.headGroove) {
+        a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+      }
     }
     a.requestRaf('dance-groove-raf', grooveLoop);
   };
@@ -87,6 +94,7 @@ export function startDanceCycle(card, bpm) {
   const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];  // tier-scaled eye pulse
   const bellowsPump = [2, 3, 4, 5][tierIdx];              // downbeat pump px
 
+  let wasHeld = false;
   const step = () => {
     if (card._state !== 'dancing') return;
 
@@ -101,10 +109,18 @@ export function startDanceCycle(card, bpm) {
     // Bop hold: while a tap bop owns the head, the beat clock keeps ticking
     // (executeTick above) so phase stays synced to the music, but every
     // visual move is skipped — groove kicks, LED/eye/bellows accents,
-    // syncopation, pose keyframes, body swivel, lid. The residual groove bob
-    // decays naturally through the groove RAF loop. bop.js clears the flag
-    // at the meld point (tap_bop_resume threshold) or on settle.
-    if (card._danceHeld) { executeTick(); return; }
+    // syncopation, pose keyframes, body swivel, lid. The groove layer is
+    // frozen by the groove RAF loop. bop.js clears the flag at the meld
+    // point (tap_bop_resume threshold) or on settle.
+    if (card._danceHeld) { wasHeld = true; executeTick(); return; }
+
+    // Hold just released: re-seed lastPose from the head's live (frozen)
+    // transform so the first post-bop move eases from where the head
+    // actually is instead of teleporting to the stale pre-bop target.
+    if (wasHeld) {
+      lastPose = readHeadPose(a);
+      wasHeld = false;
+    }
 
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;

@@ -594,6 +594,35 @@ var GladosAnimator = class {
     this.el.bellows.style.transition = `transform ${dur}s ease-out`;
     this.el.bellows.style.transform = `translate3d(0, ${(this._pupilBellowsY || 0) - (this._bellowsPump || 0)}px, 0)`;
   }
+  /**
+   * Freeze all in-flight head/torso motion so a tap bop owns the head
+   * exclusively. Snapshots the live computed transforms of #glados-head and
+   * #torso-swivel into their inline styles with transition disabled —
+   * halting any running CSS transition mid-flight — then cancels the
+   * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern
+   * from playAnim() prevents the element falling back to a stale transform).
+   *
+   * Used by the tap bop: pausing the idle scheduler or holding the dance
+   * only stops NEW moves; without this freeze, an in-flight pose transition
+   * or keyframe move keeps animating the head while the bop spring bounces
+   * the #head-bop layer — two animations fighting over the same visual.
+   */
+  freezeHeadMotion() {
+    for (const el of [this.el.head, this.el.torsoSwivel]) {
+      if (!el) continue;
+      try {
+        const t = getComputedStyle(el).transform;
+        if (t && t !== "none") {
+          el.style.transition = "none";
+          el.style.transform = t;
+        } else {
+          el.style.transition = "none";
+        }
+      } catch (err) {
+      }
+    }
+    this.cancelAnim("head-keyframes");
+  }
   /** Reset the groove layer transform (spring layer on the head). */
   resetGroove() {
     this.cancelRaf("dance-groove-raf");
@@ -835,6 +864,28 @@ function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
     injectVelocity(v) {
       spring.velocity += v;
     },
+    /**
+     * Energy-add kick: boost the spring by one kick's worth of kinetic
+     * energy WITHOUT cancelling its current motion. The new velocity keeps
+     * the current direction and gains magnitude:
+     *   v' = sign(v) * sqrt(v^2 + v0^2)
+     * so a tap ALWAYS amplifies the bounce — tapping while the head is
+     * rising (negative v) no longer partially cancels the injected energy
+     * the way injectVelocity(+v0) did. At the extremes (v = 0) this
+     * degenerates to a plain injection.
+     *
+     * `maxVelocity` (optional) clamps the result so rapid clicking cannot
+     * accumulate unbounded amplitude and launch the head off-screen.
+     */
+    kick(v0, maxVelocity) {
+      const v = spring.velocity;
+      const sign = v >= 0 ? 1 : -1;
+      let boosted = sign * Math.sqrt(v * v + v0 * v0);
+      if (maxVelocity !== void 0 && Math.abs(boosted) > maxVelocity) {
+        boosted = sign * maxVelocity;
+      }
+      spring.velocity = boosted;
+    },
     reset() {
       spring.position = 0;
       spring.velocity = 0;
@@ -899,9 +950,11 @@ function startDanceCycle(card, bpm) {
     let frameTime = now - lastGrooveTime;
     lastGrooveTime = now;
     if (frameTime > 100) frameTime = 16.666;
-    groove.step(frameTime);
-    if (a.el.headGroove) {
-      a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+    if (!card._danceHeld) {
+      groove.step(frameTime);
+      if (a.el.headGroove) {
+        a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+      }
     }
     a.requestRaf("dance-groove-raf", grooveLoop);
   };
@@ -912,6 +965,7 @@ function startDanceCycle(card, bpm) {
   const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
   const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];
   const bellowsPump = [2, 3, 4, 5][tierIdx];
+  let wasHeld = false;
   const step = () => {
     if (card._state !== "dancing") return;
     const executeTick = () => {
@@ -926,8 +980,13 @@ function startDanceCycle(card, bpm) {
       a.setTimeout("dance-step", step, delay);
     };
     if (card._danceHeld) {
+      wasHeld = true;
       executeTick();
       return;
+    }
+    if (wasHeld) {
+      lastPose = readHeadPose(a);
+      wasHeld = false;
     }
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;
@@ -1230,6 +1289,7 @@ function stopTalkAnim(card) {
 
 // src/behaviors/bop.js
 function pauseBackground(card, isDancing) {
+  card.animator.freezeHeadMotion();
   if (isDancing) {
     card._danceHeld = true;
   } else {
@@ -1255,11 +1315,13 @@ function bopHead(card) {
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
   const initialVelocity = maxAmp * omega * 1.8;
   const isDancing = card._state === "dancing";
+  const maxVelocity = 2.5 * maxAmp * omega;
   if (card._bopping && card._bopSpring) {
-    card._bopSpring.injectVelocity(initialVelocity);
+    card._bopSpring.kick(initialVelocity, maxVelocity);
     pauseBackground(card, isDancing);
     card._bopResumeArmed = false;
     card._bopResumed = false;
+    card._bopMaxSeen = Math.abs(card._bopSpring.position);
     return;
   }
   pauseBackground(card, isDancing);
@@ -1271,8 +1333,8 @@ function bopHead(card) {
   card._bopping = true;
   let lastTime = performance.now();
   let lastLedUpdate = 0;
-  const threshold = maxAmp * resumeFrac;
   a.cancelRaf("bop-raf");
+  card._bopMaxSeen = 0;
   const animate = (now) => {
     if (!card._bopping) return;
     let frameTime = now - lastTime;
@@ -1296,6 +1358,10 @@ function bopHead(card) {
       a.el.headBop.style.transition = "none";
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
+    if (Math.abs(spring.position) > card._bopMaxSeen) {
+      card._bopMaxSeen = Math.abs(spring.position);
+    }
+    const threshold = card._bopMaxSeen * resumeFrac;
     if (!card._bopResumeArmed && Math.abs(spring.position) > threshold) {
       card._bopResumeArmed = true;
     }
@@ -1321,6 +1387,7 @@ function stopBop(card) {
   card._bopSpring = null;
   card._bopResumeArmed = false;
   card._bopResumed = false;
+  card._bopMaxSeen = 0;
   card._danceHeld = false;
   card.animator.cancelRaf("bop-raf");
   if (wasBopping) card.animator.resetBopLayer();

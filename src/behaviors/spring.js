@@ -36,6 +36,29 @@ export function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
       spring.velocity += v;
     },
 
+    /**
+     * Energy-add kick: boost the spring by one kick's worth of kinetic
+     * energy WITHOUT cancelling its current motion. The new velocity keeps
+     * the current direction and gains magnitude:
+     *   v' = sign(v) * sqrt(v^2 + v0^2)
+     * so a tap ALWAYS amplifies the bounce — tapping while the head is
+     * rising (negative v) no longer partially cancels the injected energy
+     * the way injectVelocity(+v0) did. At the extremes (v = 0) this
+     * degenerates to a plain injection.
+     *
+     * `maxVelocity` (optional) clamps the result so rapid clicking cannot
+     * accumulate unbounded amplitude and launch the head off-screen.
+     */
+    kick(v0, maxVelocity) {
+      const v = spring.velocity;
+      const sign = v >= 0 ? 1 : -1;
+      let boosted = sign * Math.sqrt(v * v + v0 * v0);
+      if (maxVelocity !== undefined && Math.abs(boosted) > maxVelocity) {
+        boosted = sign * maxVelocity;
+      }
+      spring.velocity = boosted;
+    },
+
     reset() {
       spring.position = 0;
       spring.velocity = 0;

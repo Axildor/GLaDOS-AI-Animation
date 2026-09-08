@@ -218,6 +218,35 @@ export class GladosAnimator {
     this.el.bellows.style.transform = `translate3d(0, ${(this._pupilBellowsY || 0) - (this._bellowsPump || 0)}px, 0)`;
   }
 
+  /**
+   * Freeze all in-flight head/torso motion so a tap bop owns the head
+   * exclusively. Snapshots the live computed transforms of #glados-head and
+   * #torso-swivel into their inline styles with transition disabled —
+   * halting any running CSS transition mid-flight — then cancels the
+   * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern
+   * from playAnim() prevents the element falling back to a stale transform).
+   *
+   * Used by the tap bop: pausing the idle scheduler or holding the dance
+   * only stops NEW moves; without this freeze, an in-flight pose transition
+   * or keyframe move keeps animating the head while the bop spring bounces
+   * the #head-bop layer — two animations fighting over the same visual.
+   */
+  freezeHeadMotion() {
+    for (const el of [this.el.head, this.el.torsoSwivel]) {
+      if (!el) continue;
+      try {
+        const t = getComputedStyle(el).transform;
+        if (t && t !== 'none') {
+          el.style.transition = 'none';
+          el.style.transform = t;
+        } else {
+          el.style.transition = 'none';
+        }
+      } catch (err) { /* stub environments */ }
+    }
+    this.cancelAnim('head-keyframes');
+  }
+
   /** Reset the groove layer transform (spring layer on the head). */
   resetGroove() {
     this.cancelRaf('dance-groove-raf');

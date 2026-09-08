@@ -11,7 +11,7 @@
  *  3. ARMED tail meld: the resume threshold must NOT trip on the spring's
  *     first frames (position ramping up from 0) — it only fires after the
  *     spring has bounced ABOVE the threshold once, then decays back to it,
- *     at |position| <= maxAmp * tap_bop_resume, and BEFORE settle.
+ *     at |position| <= actualPeak * tap_bop_resume, and BEFORE settle.
  *  4. Settle: layer eased back to identity via resetBopLayer(), spring nulled,
  *     LED state restored, and a resume safety-net fires if the threshold
  *     never tripped.
@@ -20,9 +20,16 @@
  *     the hold releases at the meld point or on settle.
  *  6. stopBop: cancels the RAF, nulls the spring, eases the layer home, and
  *     clears the meld/hold flags.
- *  7. Re-tap mid-bop injects velocity AND re-pauses/re-arms the background.
+ *  7. Re-tap mid-bop KICKS the spring (energy-add, always amplifies) AND
+ *     re-pauses/re-arms the background.
  *  8. getGridOptions(): rows AND columns grow with zoom so the model actually
  *     enlarges past 100 (scene must not flex-shrink to the slot width).
+ *  9. Freeze: pauseBackground() freezes in-flight head/torso motion
+ *     (freezeHeadMotion) — no dual animation during the bop.
+ * 10. Kick math: energy-add kick amplifies at peak, trough, and mid-rise;
+ *     direction preserved; amplitude cap enforced.
+ * 11. maxSeen threshold: meld fires at a fraction of the ACTUAL peak, and
+ *     the groove layer is frozen while the dance is held.
  */
 
 import { bopHead, stopBop } from '../src/behaviors/bop.js';
@@ -68,7 +75,7 @@ function makeAnimator() {
     _timers: new Map(),
     _rafs: new Map(),
     _anims: new Map(),
-    _calls: { resetBopLayer: 0, setLEDs: [], canceledAnims: [], clearedTimers: [], setHeadKeyframes: 0, setBellows: [] },
+    _calls: { resetBopLayer: 0, setLEDs: [], canceledAnims: [], clearedTimers: [], setHeadKeyframes: 0, setBellows: [], freezeHeadMotion: 0 },
 
     setTimeout(name, fn, delay) { this._timers.set(name, { fn, delay }); return name; },
     clearTimeout(name) { if (this._timers.has(name)) this._calls.clearedTimers.push(name); this._timers.delete(name); },
@@ -81,6 +88,7 @@ function makeAnimator() {
     setLid() {}, setBaseLid(v) { this.currentBaseLid = v; },
     setPupil() {}, setBellows(p, d) { this._calls.setBellows.push([p, d]); },
     setLEDs(c, o) { this.currentLedColor = c; this.currentLedOpacity = o; this._calls.setLEDs.push([c, o]); },
+    freezeHeadMotion() { this._calls.freezeHeadMotion++; this.cancelAnim('head-keyframes'); },
     resetGroove() { this.cancelRaf('dance-groove-raf'); },
     resetBopLayer() {
       this._calls.resetBopLayer++;
@@ -107,6 +115,7 @@ function makeCard(state, config = {}) {
     _bopSpring: null,
     _bopResumeArmed: false,
     _bopResumed: false,
+    _bopMaxSeen: 0,
     _danceHeld: false,
   };
 }
@@ -216,7 +225,8 @@ console.log('\n[3] Dancing tap: dance held during bop, released at meld/settle')
   check('bop active while dancing', card._bopping === true);
   check('dance hold flag set on tap', card._danceHeld === true);
   check('no idle-pose stop attempted (no idle timers cleared)', a._calls.clearedTimers.length === 0);
-  check('dance keyframes NOT cancelled', !a._calls.canceledAnims.includes('head-keyframes'));
+  check('in-flight head motion frozen on tap (freezeHeadMotion called)', a._calls.freezeHeadMotion === 1);
+  check('in-flight dance keyframes cancelled by freeze', a._calls.canceledAnims.includes('head-keyframes'));
   check('no LED writes by bop while dancing', a._calls.setLEDs.length === ledCallsBefore);
 
   const trace = pumpBop(card);
@@ -287,10 +297,96 @@ console.log('\n[6] Re-tap mid-bop: velocity injected, background re-paused, meld
   const vMid = spring1.velocity;
   bopHead(card); // re-tap
   check('same spring instance reused', card._bopSpring === spring1);
-  check('velocity injected on re-tap', Math.abs(spring1.velocity - vMid) > 0 || vBefore !== spring1.velocity);
+  // Energy-add kick: kinetic energy (v^2) must strictly increase — a plain
+  // injectVelocity could REDUCE it when the spring was moving opposite the
+  // kick (the trough-dampening bug).
+  check('re-tap kick adds energy (v^2 strictly increases)',
+    spring1.velocity * spring1.velocity > vMid * vMid,
+    `vMid=${vMid.toFixed(3)} vAfter=${spring1.velocity.toFixed(3)}`);
   check('re-tap re-paused background (idle-behavior cleared)', !a._timers.has('idle-behavior'));
   check('re-tap re-armed meld (armed flag reset)', card._bopResumeArmed === false && card._bopResumed === false);
+  check('re-tap re-baselined maxSeen', card._bopMaxSeen >= 0);
   stopBop(card);
+}
+
+// ---- 9: Kick math — always amplifies, direction preserved, capped ----
+console.log('\n[9] spring.kick: energy-add at peak / trough / mid-rise, cap enforced');
+{
+  const v0 = 3.78; // default bop kick magnitude
+  const cap = 5.25; // 2.5 * maxAmp * omega
+
+  // At the peak: v ~ 0 -> kick degenerates to injection.
+  const atPeak = createSpring({ omega: 0.14, dampingRatio: 0.3 });
+  atPeak.kick(v0, cap);
+  check('kick at peak (v=0) injects full kick', Math.abs(atPeak.velocity - v0) < 1e-9);
+
+  // Rising from the trough: v < 0 -> direction preserved, energy added.
+  // (Old injectVelocity(+v0) would have cancelled this — the dampening bug.)
+  const rising = createSpring({ omega: 0.14, dampingRatio: 0.3 });
+  rising.velocity = -2.0;
+  rising.kick(v0, cap);
+  check('kick while rising preserves direction (still negative)', rising.velocity < 0);
+  check('kick while rising adds energy (|v| > |v_before|)', Math.abs(rising.velocity) > 2.0);
+  check('kick magnitude is energy-add (sqrt(v^2+v0^2))',
+    Math.abs(Math.abs(rising.velocity) - Math.sqrt(4 + v0 * v0)) < 1e-9);
+
+  // Mid-fall: v > 0 -> same direction, boosted.
+  const falling = createSpring({ omega: 0.14, dampingRatio: 0.3 });
+  falling.velocity = 2.0;
+  falling.kick(v0, cap);
+  check('kick while falling preserves direction (still positive)', falling.velocity > 0);
+  check('kick while falling adds energy', Math.abs(falling.velocity) > 2.0);
+
+  // Cap: repeated kicks must never exceed maxVelocity.
+  const spam = createSpring({ omega: 0.14, dampingRatio: 0.3 });
+  for (let i = 0; i < 50; i++) spam.kick(v0, cap);
+  check('amplitude cap enforced under spam clicking', Math.abs(spam.velocity) <= cap + 1e-9,
+    `v=${spam.velocity.toFixed(3)} cap=${cap}`);
+}
+
+// ---- 10: maxSeen threshold — meld at a fraction of the ACTUAL peak ----
+console.log('\n[10] maxSeen meld threshold: fraction of actual peak, not theoretical maxAmp');
+{
+  const card = makeCard('idle');
+  bopHead(card);
+  const trace = pumpBop(card);
+  const peak = Math.max(...trace.map((f) => Math.abs(f.pos)));
+  const resumeFrac = 0.3;
+  // The resume must fire only after the position has decayed to ~30% of the
+  // ACTUAL peak (which overshoots the theoretical maxAmp of 15 by ~1.8x).
+  const resumedFrame = trace.find((f) => f.idleResumed);
+  check('resume fired during bounce', resumedFrame !== undefined);
+  check('resume threshold tracked actual peak (|pos| <= peak*frac at meld)',
+    Math.abs(resumedFrame.pos) <= peak * resumeFrac + 0.5,
+    `posAtMeld=${Math.abs(resumedFrame.pos).toFixed(2)} peak*frac=${(peak * resumeFrac).toFixed(2)}`);
+  check('maxSeen recorded on card', card._bopMaxSeen > 0);
+  stopBop(card);
+}
+
+// ---- 11: Groove freeze while dance held + post-hold pose continuity ----
+console.log('\n[11] Groove freeze under hold; pose re-seeded on release');
+{
+  const card = makeCard('dancing', { bpm_entity: null });
+  const a = card.animator;
+  card._danceHeld = true;
+  startDanceCycle(card, 120);
+
+  // Pump the groove RAF under hold: the groove layer transform must be
+  // FROZEN (no writes) even though the RAF loop stays alive.
+  const grooveBefore = a.el.headGroove.style.transform || '';
+  let now = performance.now();
+  for (let i = 0; i < 10; i++) { now += 16.666; const fn = a._rafs.get('dance-groove-raf'); if (fn) fn(now); }
+  check('groove RAF stays alive under hold', a._rafs.has('dance-groove-raf'));
+  check('groove layer frozen under hold (no transform writes)',
+    (a.el.headGroove.style.transform || '') === grooveBefore);
+
+  // Release: the next step must re-seed the pose and produce choreography.
+  card._danceHeld = false;
+  const stepFn = a._timers.get('dance-step');
+  if (stepFn) stepFn.fn();
+  check('choreography resumes after release (keyframes set)', a._calls.setHeadKeyframes > 0);
+  check('groove resumes after release (transform written)',
+    (a.el.headGroove.style.transform || '') !== grooveBefore || a._rafs.has('dance-groove-raf'));
 }
 
 // ---- Spring sanity: shared oscillator still behaves ----

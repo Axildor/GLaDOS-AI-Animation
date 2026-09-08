@@ -26,9 +26,10 @@
  * immediately and background motion would resume on frame 1 regardless of
  * the configured resume point.
  *
- * Interruptible: re-tapping mid-bop injects velocity AND re-pauses/re-arms
- * the background (each tap is a fresh bop with a fresh meld point). On
- * settle the layer eases back to identity and saved LED state is restored.
+ * Interruptible: re-tapping mid-bop KICKS the spring (energy-add velocity
+ * boost that always amplifies the bounce, never cancels it) AND re-pauses/
+ * re-arms the background (each tap is a fresh bop with a fresh meld point).
+ * On settle the layer eases back to identity and saved LED state is restored.
  *
  * Tracked resource name: 'bop-raf'.
  */
@@ -45,6 +46,13 @@ import { createSpring } from './spring.js';
  *    moves until the bop melds or settles.
  */
 function pauseBackground(card, isDancing) {
+  // Freeze in-flight motion FIRST: pausing the idle scheduler or holding the
+  // dance only stops NEW moves — a pose transition or keyframe animation
+  // already mid-flight would keep animating #glados-head while the bop
+  // spring bounces #head-bop (two animations fighting over the head).
+  // freezeHeadMotion() snapshots the live transforms inline (transition
+  // disabled) and cancels the tracked head-keyframes WAAPI animation.
+  card.animator.freezeHeadMotion();
   if (isDancing) {
     card._danceHeld = true;
   } else {
@@ -79,13 +87,24 @@ export function bopHead(card) {
 
   const isDancing = card._state === 'dancing';
 
+  // Amplitude cap: peak amplitude ~= velocity / omega, so clamp the kick
+  // velocity to keep the worst-case bounce at ~2.5x maxAmp no matter how
+  // fast the user spam-clicks.
+  const maxVelocity = 2.5 * maxAmp * omega;
+
   if (card._bopping && card._bopSpring) {
-    card._bopSpring.injectVelocity(initialVelocity);
+    // Energy-add kick: v' = sign(v)*sqrt(v^2 + v0^2). Unlike a plain
+    // injectVelocity(+v0), this ALWAYS amplifies the bounce — tapping while
+    // the head is rising from the trough no longer partially cancels the
+    // injected energy and dampen the spring.
+    card._bopSpring.kick(initialVelocity, maxVelocity);
     // Re-tap = a fresh bop: re-pause background motion and re-arm the
     // threshold so the new, larger bounce must peak before melding again.
     pauseBackground(card, isDancing);
     card._bopResumeArmed = false;
     card._bopResumed = false;
+    // Re-derive the meld threshold from THIS bounce's peak, not the stale one.
+    card._bopMaxSeen = Math.abs(card._bopSpring.position);
     return;
   }
 
@@ -110,9 +129,11 @@ export function bopHead(card) {
 
   let lastTime = performance.now();
   let lastLedUpdate = 0;
-  const threshold = maxAmp * resumeFrac;
-
   a.cancelRaf('bop-raf');
+  // The meld threshold is a fraction of the ACTUAL peak (tracked per frame),
+  // not the theoretical maxAmp — the velocity seed overshoots maxAmp by ~1.8x,
+  // so a maxAmp-based threshold fired earlier than the slider implied.
+  card._bopMaxSeen = 0;
 
   const animate = (now) => {
     if (!card._bopping) return;
@@ -147,6 +168,13 @@ export function bopHead(card) {
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
 
+    // Track the actual peak so the meld threshold is an honest fraction of
+    // the real bounce amplitude.
+    if (Math.abs(spring.position) > card._bopMaxSeen) {
+      card._bopMaxSeen = Math.abs(spring.position);
+    }
+    const threshold = card._bopMaxSeen * resumeFrac;
+
     // Arm the meld only after the spring has actually bounced ABOVE the
     // threshold — the first frames ramp up from 0 and would otherwise trip
     // the check instantly, resuming background motion on frame 1.
@@ -155,7 +183,7 @@ export function bopHead(card) {
     }
 
     // Tail meld: once armed and the bounce decays back to the configured
-    // fraction of max amplitude, resume the background motion (idle head
+    // fraction of the ACTUAL peak, resume the background motion (idle head
     // poses / dance choreography) while the tail is still bouncing on the
     // bop layer.
     if (!card._bopResumed && card._bopResumeArmed
@@ -188,6 +216,7 @@ export function stopBop(card) {
   // future dance cycle (stopBop also runs on every state change).
   card._bopResumeArmed = false;
   card._bopResumed = false;
+  card._bopMaxSeen = 0;
   card._danceHeld = false;
   card.animator.cancelRaf('bop-raf');
   // Ease-clear the layer so a state change mid-bop glides home instead of
