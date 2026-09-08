@@ -96,6 +96,17 @@ export class GladosAnimator {
    * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
    */
   playAnim(name, el, keyframes, opts) {
+    // Cancel-snap guard: cancelling a fill:'forwards' animation makes the
+    // element fall back to its stale base transform for a frame before the
+    // new animation's first keyframe applies. Freezing the live computed
+    // transform into the inline style first removes that snap frame.
+    try {
+      const t = getComputedStyle(el).transform;
+      if (t && t !== 'none') {
+        el.style.transition = 'none';
+        el.style.transform = t;
+      }
+    } catch (err) { /* stub environments */ }
     this.cancelAnim(name);
     const anim = el.animate(keyframes, opts);
     // NOTE: finished fill:'forwards' animations keep applying their effect,

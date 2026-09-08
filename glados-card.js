@@ -433,6 +433,14 @@ var GladosAnimator = class {
    * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
    */
   playAnim(name, el, keyframes, opts) {
+    try {
+      const t = getComputedStyle(el).transform;
+      if (t && t !== "none") {
+        el.style.transition = "none";
+        el.style.transform = t;
+      }
+    } catch (err) {
+    }
     this.cancelAnim(name);
     const anim = el.animate(keyframes, opts);
     this._anims.set(name, anim);
@@ -763,6 +771,20 @@ function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
 }
 
 // src/behaviors/dance.js
+function readHeadPose(a) {
+  try {
+    const t = getComputedStyle(a.el.head).transform;
+    if (!t || t === "none") return [0, 0, 0, 1];
+    const m = t.match(/matrix\(([^)]+)\)/);
+    if (!m) return [0, 0, 0, 1];
+    const [m11, m12, , , e, f] = m[1].split(",").map(Number);
+    const scale = Math.sqrt(m11 * m11 + m12 * m12) || 1;
+    const rot = Math.atan2(m12, m11) * 180 / Math.PI;
+    return [rot, e, f, scale];
+  } catch (err) {
+    return [0, 0, 0, 1];
+  }
+}
 function startDanceCycle(card, bpm) {
   const a = card.animator;
   stopDanceCycle(card);
@@ -790,7 +812,7 @@ function startDanceCycle(card, bpm) {
     a.requestRaf("dance-groove-raf", grooveLoop);
   };
   a.requestRaf("dance-groove-raf", grooveLoop);
-  let lastPose = [0, 0, 0, 1];
+  let lastPose = readHeadPose(a);
   const windup = [0.25, 0.35, 0.45, 0.55][tierIdx];
   const overshoot = [1.15, 1.2, 1.25, 1.3][tierIdx];
   const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
@@ -1026,15 +1048,31 @@ function startDanceCycle(card, bpm) {
       }
       a.setPupil((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
     }
+    if (currentBpm < 90) {
+      moveDur = Math.min(moveDur, beatSec * 1.9);
+    } else {
+      moveDur = beatSec * 0.95;
+    }
     const target = [r, tx, ty, s];
-    const anti = [-r * windup, -tx * windup, -ty * windup, 1 - (s - 1) * windup * 0.5];
     const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
-    a.setHeadKeyframes([
-      { pose: lastPose, offset: 0, easing: "ease-in" },
-      { pose: anti, offset: windupFrac, easing: "ease-out" },
-      { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
-      { pose: target }
-    ], moveDur);
+    let frames;
+    if (currentBpm < 90 || isDownBeat) {
+      const wScale = currentBpm < 90 ? 1 : [0.6, 0.4, 0.25][tierIdx - 1];
+      const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+      frames = [
+        { pose: lastPose, offset: 0, easing: "ease-in" },
+        { pose: anti, offset: windupFrac, easing: "ease-out" },
+        { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+        { pose: target }
+      ];
+    } else {
+      frames = [
+        { pose: lastPose, offset: 0, easing: "ease-in-out" },
+        { pose: hit, offset: 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+        { pose: target }
+      ];
+    }
+    a.setHeadKeyframes(frames, moveDur);
     lastPose = target;
     a.setBodySwivel(r * -0.8, 1, bodyDur);
     a.setBaseLid(lid, beatSec * 0.5);
@@ -1048,6 +1086,14 @@ function stopDanceCycle(card) {
   a.clearTimeout("dance-led");
   a.clearTimeout("dance-sync");
   a.clearTimeout("dance-sync-led");
+  try {
+    const t = getComputedStyle(a.el.head).transform;
+    if (t && t !== "none") {
+      a.el.head.style.transition = "none";
+      a.el.head.style.transform = t;
+    }
+  } catch (err) {
+  }
   a.cancelAnim("head-keyframes");
   a.resetGroove();
   a.setBellows(0, 0.3);
