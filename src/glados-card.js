@@ -90,7 +90,13 @@ export class GladosCard extends HTMLElement {
     // card instead of clipping the scene and shifting the model downward.
     // zoom 85 → 4 rows (default), zoom 100 → 5, zoom 200 → 9.
     const rows = Math.max(4, Math.ceil((320 * scale + 24) / 80));
-    return { rows, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
+    // Columns must grow with zoom too: the scene is 280px × scale wide, and
+    // the SVG's preserveAspectRatio caps the model's scale to the slot width.
+    // A fixed 6-column slot flex-shrinks the scene back down at zoom > 100,
+    // pinning the model at ~100% while the extra rows add empty space.
+    // zoom 85 → 6 columns (default), zoom 120 → 7, zoom 200 → 12.
+    const columns = Math.min(12, Math.max(6, Math.round(6 * scale)));
+    return { rows, min_rows: 2, columns, min_columns: 4, max_columns: 12 };
   }
 
   /** Stop all animation resources (timers, RAFs, bop flag + spring). */

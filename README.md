@@ -76,14 +76,14 @@ tap_action:
 | `media_entity` | string | Optional | The entity ID of your media player. Triggers the dance state when `playing`. |
 | `bpm_entity` | string | Optional | The entity ID of the sensor providing the current song's BPM (requires [SongBPM-26](https://github.com/adix992/SongBPM-26)). Defaults to 120 if missing. |
 | `respond_delay` | number | Optional | Number of seconds to wait before changing from Processing (Orange) to Responding (Red). Useful if your TTS has a slight delay. Default is `0`. |
-| `zoom` | number | Optional | Scale percentage of the SVG model inside the card. Default is `85`. Above 100 the card slot grows with the model so it stays fully visible. |
+| `zoom` | number | Optional | Scale percentage of the SVG model inside the card. Default is `85`. Above 100 the card slot grows with the model (rows AND columns) so the model actually enlarges and stays fully visible. |
 | `transparent_bg` | boolean | Optional | Removes the card background, shadow, and border. Default is `false`. |
 | `tap_enabled` | boolean | Optional | Enables the tap-to-bop interaction. Default is `true`. |
 | `tap_action` | object | Optional | Standard HA action (`more-info`, `toggle`, `navigate`, `call-service`, etc.) fired on tap. Default is `{action: "none"}`. |
 | `tap_speed` | number | Optional | Bop animation speed, `0.1` (slow) – `2.0` (fast). Default is `0.5`. |
 | `tap_bounces` | number | Optional | Rebound oscillations before settling, `1`–`20`. Default is `5`. |
 | `tap_intensity` | number | Optional | How far the head pulls back, `0.5`–`2`. Default is `1.0`. |
-| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of max bounce) where the idle/dance head poses resume, `0.05`–`0.8`. Default is `0.3`. The bop plays on its own layer, so the background animation melds back in while the last small bounces are still finishing — no frozen ending. |
+| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of max bounce) where the paused background resumes, `0.05`–`0.8`. Default is `0.3`. Tapping pauses idle head poses — or holds the dance choreography (beat clock keeps running, so the dance stays synced) — and the background melds back in at this point while the last small bounces are still finishing. Re-tapping mid-bop re-pauses and re-arms the meld point. |
 
 ## 🧑‍💻 Development
 

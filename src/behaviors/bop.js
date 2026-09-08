@@ -11,22 +11,55 @@
  * Because the bop no longer owns #glados-head's transform, background motion
  * can keep running during the bop:
  *  - idle: only the head-pose scheduler pauses on tap; pupil darting and the
- *    lid loop keep running. Once the spring decays to config.tap_bop_resume
- *    of its max amplitude, idle head poses RESUME while the tail bounces
- *    finish — the bop tail "melds" back into the idle animation instead of
- *    ending on a frozen frame.
- *  - dancing: dance keyframes, groove, and LEDs are never touched; the bop
- *    simply plays on top (fixes tap-bop-while-dancing being invisible when
- *    the bop used to fight dance's per-beat keyframes for one transform).
+ *    lid loop keep running. Once the spring has peaked and decays back to
+ *    config.tap_bop_resume of its max amplitude, idle head poses RESUME
+ *    while the tail bounces finish — the bop tail "melds" back into the
+ *    idle animation instead of ending on a frozen frame.
+ *  - dancing: the dance engine is HELD on tap — the beat clock keeps ticking
+ *    (phase stays synced to the music) but pose moves, groove kicks, and
+ *    LED/eye/bellows accents are skipped. The residual groove bob decays
+ *    naturally, then the dance resumes at the same tap_bop_resume threshold.
  *
- * Interruptible: re-tapping mid-bop injects velocity. On settle the layer
- * eases back to identity and saved LED state is restored.
+ * The resume check is ARMED: it only trips after the spring has actually
+ * bounced ABOVE the threshold once. Without arming, the spring's first
+ * frames (position still ramping up from 0) would satisfy the threshold
+ * immediately and background motion would resume on frame 1 regardless of
+ * the configured resume point.
+ *
+ * Interruptible: re-tapping mid-bop injects velocity AND re-pauses/re-arms
+ * the background (each tap is a fresh bop with a fresh meld point). On
+ * settle the layer eases back to identity and saved LED state is restored.
  *
  * Tracked resource name: 'bop-raf'.
  */
 
 import { stopIdleHeadPoses, startIdleHeadPoses } from './idle.js';
 import { createSpring } from './spring.js';
+
+/**
+ * Pause background motion for the duration of the bop.
+ *  - idle: stop the head-pose scheduler (pupil darting + lid loop keep
+ *    running on their own elements).
+ *  - dancing: set the dance hold flag — the beat clock keeps ticking so
+ *    phase stays synced to the music, but the choreography skips its visual
+ *    moves until the bop melds or settles.
+ */
+function pauseBackground(card, isDancing) {
+  if (isDancing) {
+    card._danceHeld = true;
+  } else {
+    stopIdleHeadPoses(card);
+  }
+}
+
+/** Release the background hold (meld point or settle safety net). */
+function resumeBackground(card, isDancing) {
+  if (isDancing) {
+    card._danceHeld = false;
+  } else if (card._state === 'idle') {
+    startIdleHeadPoses(card);
+  }
+}
 
 export function bopHead(card) {
   const a = card.animator;
@@ -44,18 +77,23 @@ export function bopHead(card) {
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
   const initialVelocity = maxAmp * omega * 1.8;
 
+  const isDancing = card._state === 'dancing';
+
   if (card._bopping && card._bopSpring) {
     card._bopSpring.injectVelocity(initialVelocity);
+    // Re-tap = a fresh bop: re-pause background motion and re-arm the
+    // threshold so the new, larger bounce must peak before melding again.
+    pauseBackground(card, isDancing);
+    card._bopResumeArmed = false;
+    card._bopResumed = false;
     return;
   }
-
-  const isDancing = card._state === 'dancing';
 
   // Idle: pause ONLY the head-pose behaviors (scans, blinks, glitches).
   // Pupil darting and the lid loop keep running — they drive separate
   // elements, so nothing conflicts, and the model never reads as frozen.
-  // Dancing: the dance engine is left completely alone.
-  if (!isDancing) stopIdleHeadPoses(card);
+  // Dancing: hold the choreography (beat clock keeps running, visuals skip).
+  pauseBackground(card, isDancing);
 
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
@@ -72,7 +110,7 @@ export function bopHead(card) {
 
   let lastTime = performance.now();
   let lastLedUpdate = 0;
-  let resumed = false;
+  const threshold = maxAmp * resumeFrac;
 
   a.cancelRaf('bop-raf');
 
@@ -93,8 +131,11 @@ export function bopHead(card) {
       a.resetBopLayer();
       if (!isDancing) a.setLEDs(savedLedColor, savedLedOpacity);
       // Tail-resume safety net: if the resume threshold never tripped
-      // (e.g. an extremely low tap_bop_resume), start idle head poses now.
-      if (card._state === 'idle' && !resumed) startIdleHeadPoses(card);
+      // (e.g. an extremely low tap_bop_resume or a tiny peak), release the
+      // background hold now so idle/dance can never stay frozen.
+      if (!card._bopResumed) resumeBackground(card, isDancing);
+      card._bopResumeArmed = false;
+      card._bopResumed = false;
       return;
     }
 
@@ -106,14 +147,21 @@ export function bopHead(card) {
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
 
-    // Tail meld: once the bounce decays to the configured fraction of max
-    // amplitude, resume the idle head-pose scheduler while the tail is
-    // still bouncing on the bop layer. Dance never stopped, so there is
-    // nothing to resume in the dancing state.
-    if (!resumed && !isDancing && card._state === 'idle'
-        && Math.abs(spring.position) <= maxAmp * resumeFrac) {
-      resumed = true;
-      startIdleHeadPoses(card);
+    // Arm the meld only after the spring has actually bounced ABOVE the
+    // threshold — the first frames ramp up from 0 and would otherwise trip
+    // the check instantly, resuming background motion on frame 1.
+    if (!card._bopResumeArmed && Math.abs(spring.position) > threshold) {
+      card._bopResumeArmed = true;
+    }
+
+    // Tail meld: once armed and the bounce decays back to the configured
+    // fraction of max amplitude, resume the background motion (idle head
+    // poses / dance choreography) while the tail is still bouncing on the
+    // bop layer.
+    if (!card._bopResumed && card._bopResumeArmed
+        && Math.abs(spring.position) <= threshold) {
+      card._bopResumed = true;
+      resumeBackground(card, isDancing);
     }
 
     // LED brightness tracks displacement — idle only. During a dance the
@@ -136,6 +184,11 @@ export function stopBop(card) {
   const wasBopping = card._bopping;
   card._bopping = false;
   card._bopSpring = null;
+  // Clear the meld/hold state so nothing leaks into the next bop or a
+  // future dance cycle (stopBop also runs on every state change).
+  card._bopResumeArmed = false;
+  card._bopResumed = false;
+  card._danceHeld = false;
   card.animator.cancelRaf('bop-raf');
   // Ease-clear the layer so a state change mid-bop glides home instead of
   // snapping. Only needed if a transform was actually written.

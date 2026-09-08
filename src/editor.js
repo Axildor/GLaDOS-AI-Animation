@@ -148,7 +148,7 @@ export function buildEditorForm() {
         tap_speed: '0.1 = slow, 0.5 = normal, 2.0 = fast.',
         tap_intensity: 'How far the head pulls back.',
         tap_bounces: 'Full oscillation cycles before settling.',
-        tap_bop_resume: 'Point in the bop tail (fraction of max bounce) where idle/dance head poses resume. Low = resume late, high = resume early.',
+        tap_bop_resume: 'Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if GLaDOS was dancing. Low = resume late, high = resume early.',
       };
       return helpers[schema.name];
     },

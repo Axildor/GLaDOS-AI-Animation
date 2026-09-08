@@ -175,7 +175,7 @@ function buildEditorForm() {
         tap_speed: "0.1 = slow, 0.5 = normal, 2.0 = fast.",
         tap_intensity: "How far the head pulls back.",
         tap_bounces: "Full oscillation cycles before settling.",
-        tap_bop_resume: "Point in the bop tail (fraction of max bounce) where idle/dance head poses resume. Low = resume late, high = resume early."
+        tap_bop_resume: "Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if GLaDOS was dancing. Low = resume late, high = resume early."
       };
       return helpers[schema.name];
     }
@@ -213,7 +213,11 @@ function buildTemplate(config) {
       :host { display: flex; align-items: center; justify-content: center; ${bgStyle} border-radius: var(--ha-card-border-radius, 12px); overflow: hidden; width: 100%; }
       /* contain: layout paint \u2014 repaints inside the card never invalidate the
          dashboard around it (and vice versa) on weak tablet GPUs. */
-      #scene { position: relative; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; contain: layout paint; }
+      /* flex: none \u2014 the scene keeps its exact zoomed px size; a flex item
+         would otherwise shrink back to the slot width at zoom > 100, and the
+         SVG's preserveAspectRatio would pin the model at ~100%. getGridOptions()
+         grows the slot (rows AND columns) to match. */
+      #scene { position: relative; flex: none; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; contain: layout paint; }
 
       #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
       /* isolation: isolate \u2014 the SVG forms its own stacking context so its
@@ -910,6 +914,21 @@ function startDanceCycle(card, bpm) {
   const bellowsPump = [2, 3, 4, 5][tierIdx];
   const step = () => {
     if (card._state !== "dancing") return;
+    const executeTick = () => {
+      dancePhase++;
+      const now = performance.now();
+      if (now > expectedNextTick + beatMs) {
+        expectedNextTick = now;
+      } else {
+        expectedNextTick += beatMs;
+      }
+      const delay = Math.max(0, expectedNextTick - now);
+      a.setTimeout("dance-step", step, delay);
+    };
+    if (card._danceHeld) {
+      executeTick();
+      return;
+    }
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;
       do {
@@ -950,17 +969,6 @@ function startDanceCycle(card, bpm) {
     let r = 0, tx = 0, ty = 0, s = 1, lid = 0, ease = "ease-in-out";
     let moveDur = beatSec;
     let bodyDur = beatSec * 2;
-    const executeTick = () => {
-      dancePhase++;
-      const now = performance.now();
-      if (now > expectedNextTick + beatMs) {
-        expectedNextTick = now;
-      } else {
-        expectedNextTick += beatMs;
-      }
-      const delay = Math.max(0, expectedNextTick - now);
-      a.setTimeout("dance-step", step, delay);
-    };
     if (currentBpm < 90) {
       moveDur = beatSec * 2;
       bodyDur = beatSec * 4;
@@ -1221,6 +1229,20 @@ function stopTalkAnim(card) {
 }
 
 // src/behaviors/bop.js
+function pauseBackground(card, isDancing) {
+  if (isDancing) {
+    card._danceHeld = true;
+  } else {
+    stopIdleHeadPoses(card);
+  }
+}
+function resumeBackground(card, isDancing) {
+  if (isDancing) {
+    card._danceHeld = false;
+  } else if (card._state === "idle") {
+    startIdleHeadPoses(card);
+  }
+}
 function bopHead(card) {
   const a = card.animator;
   const config = card.config;
@@ -1232,12 +1254,15 @@ function bopHead(card) {
   const omega = 0.28 * Math.max(0.01, backendSpeed);
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
   const initialVelocity = maxAmp * omega * 1.8;
+  const isDancing = card._state === "dancing";
   if (card._bopping && card._bopSpring) {
     card._bopSpring.injectVelocity(initialVelocity);
+    pauseBackground(card, isDancing);
+    card._bopResumeArmed = false;
+    card._bopResumed = false;
     return;
   }
-  const isDancing = card._state === "dancing";
-  if (!isDancing) stopIdleHeadPoses(card);
+  pauseBackground(card, isDancing);
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
   const spring = createSpring({ omega, dampingRatio });
@@ -1246,7 +1271,7 @@ function bopHead(card) {
   card._bopping = true;
   let lastTime = performance.now();
   let lastLedUpdate = 0;
-  let resumed = false;
+  const threshold = maxAmp * resumeFrac;
   a.cancelRaf("bop-raf");
   const animate = (now) => {
     if (!card._bopping) return;
@@ -1259,7 +1284,9 @@ function bopHead(card) {
       card._bopSpring = null;
       a.resetBopLayer();
       if (!isDancing) a.setLEDs(savedLedColor, savedLedOpacity);
-      if (card._state === "idle" && !resumed) startIdleHeadPoses(card);
+      if (!card._bopResumed) resumeBackground(card, isDancing);
+      card._bopResumeArmed = false;
+      card._bopResumed = false;
       return;
     }
     const ty = spring.position;
@@ -1269,9 +1296,12 @@ function bopHead(card) {
       a.el.headBop.style.transition = "none";
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
-    if (!resumed && !isDancing && card._state === "idle" && Math.abs(spring.position) <= maxAmp * resumeFrac) {
-      resumed = true;
-      startIdleHeadPoses(card);
+    if (!card._bopResumeArmed && Math.abs(spring.position) > threshold) {
+      card._bopResumeArmed = true;
+    }
+    if (!card._bopResumed && card._bopResumeArmed && Math.abs(spring.position) <= threshold) {
+      card._bopResumed = true;
+      resumeBackground(card, isDancing);
     }
     if (!isDancing && now - lastLedUpdate > 60) {
       lastLedUpdate = now;
@@ -1289,6 +1319,9 @@ function stopBop(card) {
   const wasBopping = card._bopping;
   card._bopping = false;
   card._bopSpring = null;
+  card._bopResumeArmed = false;
+  card._bopResumed = false;
+  card._danceHeld = false;
   card.animator.cancelRaf("bop-raf");
   if (wasBopping) card.animator.resetBopLayer();
 }
@@ -1460,7 +1493,8 @@ var GladosCard = class extends HTMLElement {
     const zoom = this.config?.zoom ?? 85;
     const scale = zoom / 100;
     const rows = Math.max(4, Math.ceil((320 * scale + 24) / 80));
-    return { rows, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
+    const columns = Math.min(12, Math.max(6, Math.round(6 * scale)));
+    return { rows, min_rows: 2, columns, min_columns: 4, max_columns: 12 };
   }
   /** Stop all animation resources (timers, RAFs, bop flag + spring). */
   _teardownAnimation() {

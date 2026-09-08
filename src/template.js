@@ -18,7 +18,11 @@ export function buildTemplate(config) {
       :host { display: flex; align-items: center; justify-content: center; ${bgStyle} border-radius: var(--ha-card-border-radius, 12px); overflow: hidden; width: 100%; }
       /* contain: layout paint — repaints inside the card never invalidate the
          dashboard around it (and vice versa) on weak tablet GPUs. */
-      #scene { position: relative; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; contain: layout paint; }
+      /* flex: none — the scene keeps its exact zoomed px size; a flex item
+         would otherwise shrink back to the slot width at zoom > 100, and the
+         SVG's preserveAspectRatio would pin the model at ~100%. getGridOptions()
+         grows the slot (rows AND columns) to match. */
+      #scene { position: relative; flex: none; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; contain: layout paint; }
 
       #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
       /* isolation: isolate — the SVG forms its own stacking context so its

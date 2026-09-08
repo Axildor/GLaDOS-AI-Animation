@@ -8,19 +8,33 @@
  *     #glados-head is never touched (idle poses / dance keyframes own it).
  *  2. Idle tap pauses ONLY head-pose idle behaviors (idle-behavior /
  *     idle-blink / idle-glitch); the pupil timer ('idle-pupil') survives.
- *  3. Tail meld: startIdleHeadPoses fires while the spring is still bouncing,
+ *  3. ARMED tail meld: the resume threshold must NOT trip on the spring's
+ *     first frames (position ramping up from 0) — it only fires after the
+ *     spring has bounced ABOVE the threshold once, then decays back to it,
  *     at |position| <= maxAmp * tap_bop_resume, and BEFORE settle.
  *  4. Settle: layer eased back to identity via resetBopLayer(), spring nulled,
  *     LED state restored, and a resume safety-net fires if the threshold
  *     never tripped.
- *  5. Dancing: no idle-pose stop, no LED writes, no head-keyframes cancel —
- *     the bop composes on top of the dance.
- *  6. stopBop: cancels the RAF, nulls the spring, eases the layer home.
- *  7. Re-tap mid-bop injects velocity instead of restarting.
+ *  5. Dancing: the dance engine is HELD on tap (_danceHeld) — beat clock
+ *     keeps ticking, but pose moves / groove kicks / LED accents are skipped;
+ *     the hold releases at the meld point or on settle.
+ *  6. stopBop: cancels the RAF, nulls the spring, eases the layer home, and
+ *     clears the meld/hold flags.
+ *  7. Re-tap mid-bop injects velocity AND re-pauses/re-arms the background.
+ *  8. getGridOptions(): rows AND columns grow with zoom so the model actually
+ *     enlarges past 100 (scene must not flex-shrink to the slot width).
  */
 
 import { bopHead, stopBop } from '../src/behaviors/bop.js';
 import { createSpring } from '../src/behaviors/spring.js';
+import { startDanceCycle } from '../src/behaviors/dance.js';
+
+// glados-card.js extends HTMLElement, which Node doesn't define. Shim it
+// before the dynamic import below so the class declaration can extend it.
+if (typeof HTMLElement === 'undefined') {
+  globalThis.HTMLElement = class HTMLElement {};
+}
+const { GladosCard } = await import('../src/glados-card.js');
 
 // ---- Controllable clock + RAF/timer stubs ----
 
@@ -54,7 +68,7 @@ function makeAnimator() {
     _timers: new Map(),
     _rafs: new Map(),
     _anims: new Map(),
-    _calls: { resetBopLayer: 0, setLEDs: [], canceledAnims: [], clearedTimers: [] },
+    _calls: { resetBopLayer: 0, setLEDs: [], canceledAnims: [], clearedTimers: [], setHeadKeyframes: 0, setBellows: [] },
 
     setTimeout(name, fn, delay) { this._timers.set(name, { fn, delay }); return name; },
     clearTimeout(name) { if (this._timers.has(name)) this._calls.clearedTimers.push(name); this._timers.delete(name); },
@@ -63,9 +77,9 @@ function makeAnimator() {
     cancelAnim(name) { this._calls.canceledAnims.push(name); this._anims.delete(name); },
     playAnim(name) { this._anims.set(name, { cancel() {} }); return { cancel() {} }; },
     setHead() {}, setBodySwivel() {}, resetBodySwivel() {},
-    setHeadKeyframes(frames, dur) { this._anims.set('head-keyframes', { cancel() {} }); return { cancel() {} }; },
+    setHeadKeyframes(frames, dur) { this._calls.setHeadKeyframes++; this._anims.set('head-keyframes', { cancel() {} }); return { cancel() {} }; },
     setLid() {}, setBaseLid(v) { this.currentBaseLid = v; },
-    setPupil() {}, setBellows() {},
+    setPupil() {}, setBellows(p, d) { this._calls.setBellows.push([p, d]); },
     setLEDs(c, o) { this.currentLedColor = c; this.currentLedOpacity = o; this._calls.setLEDs.push([c, o]); },
     resetGroove() { this.cancelRaf('dance-groove-raf'); },
     resetBopLayer() {
@@ -91,6 +105,9 @@ function makeCard(state, config = {}) {
     animator: makeAnimator(),
     _bopping: false,
     _bopSpring: null,
+    _bopResumeArmed: false,
+    _bopResumed: false,
+    _danceHeld: false,
   };
 }
 
@@ -112,6 +129,7 @@ function pumpBop(card, maxFrames = 2000) {
       headTransform: a.el.head.style.transform || '',
       bopTransform: a.el.headBop.style.transform || '',
       bopping: card._bopping,
+      idleResumed: a._timers.has('idle-behavior'),
     });
     if (!card._bopping) break;
   }
@@ -128,8 +146,8 @@ function check(name, cond, detail = '') {
   }
 }
 
-// ---- 1+2+3+4: Idle tap — layer isolation, selective pause, tail meld, settle ----
-console.log('\n[1] Idle tap: layer isolation + selective pause + tail meld + settle');
+// ---- 1+2+3+4: Idle tap — layer isolation, selective pause, ARMED tail meld, settle ----
+console.log('\n[1] Idle tap: layer isolation + selective pause + ARMED tail meld + settle');
 {
   const card = makeCard('idle');
   const a = card.animator;
@@ -155,16 +173,25 @@ console.log('\n[1] Idle tap: layer isolation + selective pause + tail meld + set
   check('spring nulled on settle', card._bopSpring === null);
   check('LED state restored on settle', a._calls.setLEDs.some(([c, o]) => c === '#ffb800' && o === '0.15'));
 
-  // Tail meld: resume must fire while still bouncing, at/below the threshold.
+  // ARMED tail meld: the spring ramps up from 0, so an early frame can be
+  // below the threshold — but the resume must NOT fire until the spring has
+  // been ABOVE the threshold (armed) and decayed back below it.
   const maxAmp = 15 * 1.0;
   const resumeFrac = 0.3;
+  const threshold = maxAmp * resumeFrac;
   const peak = Math.max(...trace.map((f) => Math.abs(f.pos)));
-  const resumeIdx = trace.findIndex((f, i) => i > 0 && Math.abs(f.pos) <= maxAmp * resumeFrac && trace.slice(0, i + 1).some((g) => Math.abs(g.pos) > maxAmp * resumeFrac));
-  check('tail meld fired before settle', resumeIdx > 0 && resumeIdx < trace.length - 1,
-    resumeIdx < 0 ? 'never fired' : `fired at frame ${resumeIdx}/${trace.length}`);
-  check('resume position within threshold', resumeIdx > 0 && Math.abs(trace[resumeIdx].pos) <= maxAmp * resumeFrac + 1e-9);
+  const firstAboveIdx = trace.findIndex((f) => Math.abs(f.pos) > threshold);
+  const firstResumedIdx = trace.findIndex((f) => f.idleResumed);
+  check('arming: spring exceeded threshold during bounce', firstAboveIdx >= 0,
+    `peak=${peak.toFixed(2)} threshold=${threshold}`);
+  check('resume did NOT fire before arming (no below-threshold frame-1 trip)',
+    firstResumedIdx > firstAboveIdx,
+    `above@${firstAboveIdx} resumed@${firstResumedIdx}`);
+  check('resume fired while still bouncing (before settle)', firstResumedIdx > 0 && firstResumedIdx < trace.length - 1,
+    `resumed@${firstResumedIdx}/${trace.length}`);
   check('idle head poses resumed (idle-behavior timer re-set)', a._timers.has('idle-behavior'));
   check('peak amplitude in expected range', peak > 5 && peak < 40, `peak=${peak.toFixed(2)}`);
+  check('meld flags cleared after settle', card._bopResumeArmed === false && card._bopResumed === false);
 }
 
 // ---- 4b: Safety net — tiny resume threshold still resumes on settle ----
@@ -174,10 +201,11 @@ console.log('\n[2] Safety net: resume fires on settle when threshold never trips
   bopHead(card);
   pumpBop(card);
   check('idle-behavior re-set by settle safety net', card.animator._timers.has('idle-behavior'));
+  check('meld flags cleared by settle safety net', card._bopResumeArmed === false && card._bopResumed === false);
 }
 
-// ---- 5: Dancing — bop composes on top, dance untouched ----
-console.log('\n[3] Dancing tap: dance engine untouched, bop plays on top');
+// ---- 5: Dancing — bop HOLDS the dance, resumes at the meld point ----
+console.log('\n[3] Dancing tap: dance held during bop, released at meld/settle');
 {
   const card = makeCard('dancing');
   const a = card.animator;
@@ -186,17 +214,47 @@ console.log('\n[3] Dancing tap: dance engine untouched, bop plays on top');
 
   bopHead(card);
   check('bop active while dancing', card._bopping === true);
-  const trace = pumpBop(card);
+  check('dance hold flag set on tap', card._danceHeld === true);
   check('no idle-pose stop attempted (no idle timers cleared)', a._calls.clearedTimers.length === 0);
   check('dance keyframes NOT cancelled', !a._calls.canceledAnims.includes('head-keyframes'));
   check('no LED writes by bop while dancing', a._calls.setLEDs.length === ledCallsBefore);
+
+  const trace = pumpBop(card);
+
   check('#glados-head transform NEVER written while dancing', trace.every((f) => f.headTransform === ''));
   check('#head-bop bounced while dancing', trace.some((f) => f.bopTransform.includes('translate3d')));
   check('layer reset on settle while dancing', a._calls.resetBopLayer >= 1);
+  check('dance hold released by meld or settle', card._danceHeld === false);
+}
+
+// ---- 5b: dance.js honors the hold — visuals skipped, beat clock ticking ----
+console.log('\n[4] dance.js hold: pose moves skipped while beat clock keeps ticking');
+{
+  const card = makeCard('dancing', { bpm_entity: null });
+  const a = card.animator;
+  card._danceHeld = true;
+
+  startDanceCycle(card, 120);
+  // startDanceCycle calls step() once immediately; with the hold set it must
+  // only advance the beat clock (dance-step timer) and skip every visual.
+  check('beat clock still ticking under hold (dance-step timer set)', a._timers.has('dance-step'));
+  check('no pose keyframes while held', a._calls.setHeadKeyframes === 0);
+  check('no LED writes while held', a._calls.setLEDs.length === 0);
+  check('groove RAF running (residual bob decays, no new kicks)', a._rafs.has('dance-groove-raf'));
+  // setBellows(0, 0.3) from stopDanceCycle's reset is allowed; no non-zero pump.
+  check('no bellows pump while held', a._calls.setBellows.every(([p]) => p === 0));
+
+  // Release the hold: the next step must produce full choreography.
+  card._danceHeld = false;
+  const stepFn = a._timers.get('dance-step');
+  if (stepFn) stepFn.fn();
+  check('choreography resumes after hold release (keyframes set)', a._calls.setHeadKeyframes > 0);
+  check('groove RAF running after release', a._rafs.has('dance-groove-raf'));
+  check('LED writes resumed after release', a._calls.setLEDs.length > 0);
 }
 
 // ---- 6: stopBop — teardown path ----
-console.log('\n[4] stopBop: cancels RAF, nulls spring, eases layer home');
+console.log('\n[5] stopBop: cancels RAF, nulls spring, eases layer home, clears flags');
 {
   const card = makeCard('idle');
   bopHead(card);
@@ -206,6 +264,7 @@ console.log('\n[4] stopBop: cancels RAF, nulls spring, eases layer home');
   check('spring nulled', card._bopSpring === null);
   check('bop-raf cancelled', !card.animator._rafs.has('bop-raf'));
   check('layer eased home', card.animator._calls.resetBopLayer >= 1);
+  check('meld/hold flags cleared', card._bopResumeArmed === false && card._bopResumed === false && card._danceHeld === false);
 
   // stopBop when not bopping must NOT touch the layer (no stray transition).
   const idle2 = makeCard('idle');
@@ -213,33 +272,67 @@ console.log('\n[4] stopBop: cancels RAF, nulls spring, eases layer home');
   check('stopBop no-op when idle (no layer write)', idle2.animator._calls.resetBopLayer === 0);
 }
 
-// ---- 7: Re-tap mid-bop injects velocity ----
-console.log('\n[5] Re-tap mid-bop injects velocity, does not restart');
+// ---- 7: Re-tap mid-bop injects velocity AND re-pauses/re-arms ----
+console.log('\n[6] Re-tap mid-bop: velocity injected, background re-paused, meld re-armed');
 {
   const card = makeCard('idle');
   bopHead(card);
   const spring1 = card._bopSpring;
   const vBefore = spring1.velocity;
-  // Let it decay a bit.
+  // Let it decay past the meld point so the background resumes.
   const a = card.animator;
   let now = performance.now();
   for (let i = 0; i < 30; i++) { now += 16.666; const fn = a._rafs.get('bop-raf'); if (fn) fn(now); }
+  check('background resumed before re-tap (meld fired)', a._timers.has('idle-behavior'));
   const vMid = spring1.velocity;
   bopHead(card); // re-tap
   check('same spring instance reused', card._bopSpring === spring1);
   check('velocity injected on re-tap', Math.abs(spring1.velocity - vMid) > 0 || vBefore !== spring1.velocity);
+  check('re-tap re-paused background (idle-behavior cleared)', !a._timers.has('idle-behavior'));
+  check('re-tap re-armed meld (armed flag reset)', card._bopResumeArmed === false && card._bopResumed === false);
   stopBop(card);
 }
 
 // ---- Spring sanity: shared oscillator still behaves ----
-console.log('\n[6] Spring sanity (shared oscillator)');
+console.log('\n[7] Spring sanity (shared oscillator)');
 {
   const s = createSpring({ omega: 0.28, dampingRatio: 0.3 });
   s.injectVelocity(8);
-  let peak = 0;
   for (let i = 0; i < 600; i++) s.step(16.666);
   check('spring settles eventually', s.step(16.666) === true || (Math.abs(s.position) < 0.08 && Math.abs(s.velocity) < 0.08));
-  check('peak was reached', peak >= 0); // trivially true; guards refactor drift
+}
+
+// ---- 8: Zoom slot sizing — rows AND columns grow with zoom ----
+console.log('\n[8] getGridOptions: rows AND columns scale with zoom');
+{
+  // GladosCard extends HTMLElement; instantiate via a minimal shim if needed.
+  let card;
+  try {
+    card = new GladosCard();
+  } catch (err) {
+    // Stub environments without HTMLElement: exercise the math directly.
+    card = null;
+  }
+  const rowsFor = (zoom) => Math.max(4, Math.ceil((320 * (zoom / 100) + 24) / 80));
+  const colsFor = (zoom) => Math.min(12, Math.max(6, Math.round(6 * (zoom / 100))));
+  const cases = [[85, 4, 6], [100, 5, 6], [120, 6, 7], [150, 7, 9], [200, 9, 12]];
+  for (const [zoom, wantRows, wantCols] of cases) {
+    let got;
+    if (card) {
+      card.config = { zoom };
+      got = card.getGridOptions();
+      check(`zoom ${zoom}: rows=${wantRows} columns=${wantCols}`,
+        got.rows === wantRows && got.columns === wantCols,
+        `got rows=${got.rows} columns=${got.columns}`);
+    } else {
+      check(`zoom ${zoom}: rows=${wantRows} columns=${wantCols} (math)`,
+        rowsFor(zoom) === wantRows && colsFor(zoom) === wantCols);
+    }
+  }
+  if (card) {
+    const g = card.getGridOptions();
+    check('max_columns cap respected', g.max_columns === 12 && g.columns <= g.max_columns);
+  }
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);

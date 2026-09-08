@@ -90,6 +90,22 @@ export function startDanceCycle(card, bpm) {
   const step = () => {
     if (card._state !== 'dancing') return;
 
+    const executeTick = () => {
+      dancePhase++;
+      const now = performance.now();
+      if (now > expectedNextTick + beatMs) { expectedNextTick = now; } else { expectedNextTick += beatMs; }
+      const delay = Math.max(0, expectedNextTick - now);
+      a.setTimeout('dance-step', step, delay);
+    };
+
+    // Bop hold: while a tap bop owns the head, the beat clock keeps ticking
+    // (executeTick above) so phase stays synced to the music, but every
+    // visual move is skipped — groove kicks, LED/eye/bellows accents,
+    // syncopation, pose keyframes, body swivel, lid. The residual groove bob
+    // decays naturally through the groove RAF loop. bop.js clears the flag
+    // at the meld point (tap_bop_resume threshold) or on settle.
+    if (card._danceHeld) { executeTick(); return; }
+
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;
       do { nextRoutine = Math.floor(Math.random() * 8); } while (nextRoutine === currentRoutine);
@@ -136,14 +152,6 @@ export function startDanceCycle(card, bpm) {
     let r = 0, tx = 0, ty = 0, s = 1.0, lid = 0.0, ease = 'ease-in-out';
     let moveDur = beatSec;
     let bodyDur = beatSec * 2;
-
-    const executeTick = () => {
-      dancePhase++;
-      const now = performance.now();
-      if (now > expectedNextTick + beatMs) { expectedNextTick = now; } else { expectedNextTick += beatMs; }
-      const delay = Math.max(0, expectedNextTick - now);
-      a.setTimeout('dance-step', step, delay);
-    };
 
     if (currentBpm < 90) {
       // Chill & Soulful: fluid, heavily relaxed movements
