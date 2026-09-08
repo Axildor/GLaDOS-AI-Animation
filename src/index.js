@@ -1,12 +1,12 @@
 /**
  * index.js — Bundle entry point.
- * Registers the custom elements and the HACS/HA card picker entry.
+ * Registers the card element and the HACS/HA card picker entry.
+ * The visual editor is HA's native getConfigForm() form (schema in
+ * editor.js) — no custom editor element is registered.
  */
 
 import { GladosCard } from './glados-card.js';
-import { GladosCardEditor } from './editor.js';
 
-customElements.define('glados-card-editor', GladosCardEditor);
 customElements.define('glados-card', GladosCard);
 
 window.customCards = window.customCards || [];

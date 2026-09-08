@@ -7,6 +7,7 @@
  */
 
 import { sanitizeConfig, getStubConfig } from './config.js';
+import { buildEditorForm } from './editor.js';
 import { resolveState, parseBpm } from './state-mapper.js';
 import { buildTemplate } from './template.js';
 import { GladosAnimator } from './animator.js';
@@ -28,7 +29,9 @@ export class GladosCard extends HTMLElement {
     this.contentReady = false;
   }
 
-  static getConfigElement() { return document.createElement('glados-card-editor'); }
+  // Native HA form editor: HA renders <ha-form> from this schema (same
+  // mechanism mushroom cards use). Schema + labels live in editor.js.
+  static getConfigForm() { return buildEditorForm(); }
   static getStubConfig() { return getStubConfig(); }
 
   setConfig(config) {
@@ -92,6 +95,14 @@ export class GladosCard extends HTMLElement {
       document.addEventListener('visibilitychange', this._boundVisibility);
     }
     if (this.contentReady) {
+      // Re-attach tap/keyboard handlers: HA's renderer (sections, lazy load,
+      // edit mode) detaches and re-attaches card elements without recreating
+      // them, and disconnectedCallback() removed the listeners. addEventListener
+      // dedupes identical function references, so this is safe on every connect.
+      if (this._hitbox) {
+        if (this._tapHandler) this._hitbox.addEventListener('click', this._tapHandler);
+        if (this._keyHandler) this._hitbox.addEventListener('keydown', this._keyHandler);
+      }
       const pivots = this.shadowRoot.querySelectorAll('#body-pivot, #head-sway-pivot');
       pivots.forEach((p) => { p.style.animation = 'none'; });
       requestAnimationFrame(() => {
@@ -133,7 +144,8 @@ export class GladosCard extends HTMLElement {
       e.stopPropagation();
       e.preventDefault();
 
-      bopHead(this);
+      // Guarded: an animation failure must never block the action dispatch.
+      try { bopHead(this); } catch (err) { console.warn('glados-card: bop failed', err); }
 
       const actionObj = this.config.tap_action || { action: 'none' };
       if (actionObj.action === 'none') return;

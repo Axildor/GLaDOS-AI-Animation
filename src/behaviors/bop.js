@@ -34,11 +34,19 @@ export function bopHead(card) {
   stopIdleCycle(card);
   stopLidBehavior(card);
 
+  // Cancel any lingering fill:'forwards' WAAPI animation (dance keyframes) —
+  // active WAAPI animations override inline style.transform writes, so the
+  // bop below would be invisible while one is running.
+  a.cancelAnim('head-keyframes');
+
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
   const savedBaseLid = a.currentBaseLid;
 
   const spring = createSpring({ omega, dampingRatio });
+  // Seed the oscillator: a fresh spring starts at rest and would settle on
+  // the first frame with zero visible motion. Mirrors the dance groove kick.
+  spring.injectVelocity(initialVelocity);
   card._bopSpring = spring;
 
   let lastTime = performance.now();

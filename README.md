@@ -52,7 +52,7 @@ You will need an integration that provides a BPM sensor for your media player. I
 
 ## ⚙️ Configuration
 
-You can easily configure the card using the Home Assistant visual editor simply by clicking "Add Card" and searching for "GLaDOS Custom Card". 
+You can easily configure the card using the Home Assistant visual editor simply by clicking "Add Card" and searching for "GLaDOS Custom Card". The visual editor uses Home Assistant's native form components (entity pickers, sliders, toggles, and the standard action editor), so it looks and behaves like a first-party card.
 
 Alternatively, you can use YAML:
 
@@ -92,7 +92,7 @@ The card source lives in small, focused ES modules under `src/` and is bundled i
 | :--- | :--- |
 | `src/index.js` | Entry point: custom element registration + card picker entry |
 | `src/glados-card.js` | Card lifecycle, config, hass state diffing, tap handlers |
-| `src/editor.js` | Visual config editor |
+| `src/editor.js` | Declarative `getConfigForm()` schema for HA's native visual editor |
 | `src/config.js` | Config sanitization/clamping (pure functions) |
 | `src/state-mapper.js` | Voice/media/BPM state mapping (pure functions) |
 | `src/template.js` | CSS + inline SVG markup (the GLaDOS model artwork) |
