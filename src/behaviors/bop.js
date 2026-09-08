@@ -9,7 +9,7 @@
  * Tracked resource name: 'bop-raf'.
  */
 
-import { startLidBehavior, stopLidBehavior, startIdleCycle } from './idle.js';
+import { startLidBehavior, stopLidBehavior, startIdleCycle, stopIdleCycle } from './idle.js';
 import { createSpring } from './spring.js';
 
 export function bopHead(card) {
@@ -25,12 +25,11 @@ export function bopHead(card) {
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
   const initialVelocity = maxAmp * omega * 1.8;
 
-  if (card._bopping) {
+  if (card._bopping && card._bopSpring) {
     card._bopSpring.injectVelocity(initialVelocity);
     return;
   }
 
-  card._bopping = true;
   stopIdleCycle(card);
   stopLidBehavior(card);
 
@@ -48,6 +47,10 @@ export function bopHead(card) {
   // the first frame with zero visible motion. Mirrors the dance groove kick.
   spring.injectVelocity(initialVelocity);
   card._bopSpring = spring;
+  // Mark the bop active only after the spring exists: if anything above
+  // throws, _bopping must stay false or every future tap would take the
+  // re-tap branch against a null spring.
+  card._bopping = true;
 
   let lastTime = performance.now();
   let lastLedUpdate = 0;

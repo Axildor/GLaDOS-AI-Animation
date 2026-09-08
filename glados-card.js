@@ -710,11 +710,11 @@ function runNextIdleBehavior(card) {
   a.setTimeout("idle-behavior", () => runNextIdleBehavior(card), chosen.min + Math.random() * (chosen.max - chosen.min));
 }
 function startIdleCycle(card) {
-  stopIdleCycle2(card);
+  stopIdleCycle(card);
   dartPupil(card);
   card.animator.setTimeout("idle-behavior", () => runNextIdleBehavior(card), 2e3 + Math.random() * 3e3);
 }
-function stopIdleCycle2(card) {
+function stopIdleCycle(card) {
   card.animator.clearTimeout("idle-behavior");
   card.animator.clearTimeout("idle-pupil");
   card.animator.clearTimeout("idle-blink");
@@ -1095,11 +1095,10 @@ function bopHead(card) {
   const omega = 0.28 * Math.max(0.01, backendSpeed);
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
   const initialVelocity = maxAmp * omega * 1.8;
-  if (card._bopping) {
+  if (card._bopping && card._bopSpring) {
     card._bopSpring.injectVelocity(initialVelocity);
     return;
   }
-  card._bopping = true;
   stopIdleCycle(card);
   stopLidBehavior(card);
   a.cancelAnim("head-keyframes");
@@ -1109,6 +1108,7 @@ function bopHead(card) {
   const spring = createSpring({ omega, dampingRatio });
   spring.injectVelocity(initialVelocity);
   card._bopSpring = spring;
+  card._bopping = true;
   let lastTime = performance.now();
   let lastLedUpdate = 0;
   a.cancelRaf("bop-raf");
@@ -1157,7 +1157,7 @@ function resetAll(card) {
   const a = card.animator;
   stopTalkAnim(card);
   stopLidBehavior(card);
-  stopIdleCycle2(card);
+  stopIdleCycle(card);
   stopDanceCycle(card);
   stopBop(card);
   a.el.ledMatrices.forEach((m) => m.classList.remove("pulsing"));
