@@ -18,7 +18,12 @@ She tracks your voice assistant's state in real-time, features a randomized idle
 
 When your configured media player starts playing, GLaDOS enters a dedicated **Spotify Green** dance mode. 
 
-Instead of a basic looped animation, she features a **Macro-Choreography Math Engine** that actively reads the tempo of your music and chains together **32 unique, tempo-locked dance routines**. Every 16 beats, she randomly switches her dance style so the animation stays fresh throughout a full song.
+Instead of a basic looped animation, she features a **Macro-Choreography Math Engine** that actively reads the tempo of your music and chains together **32 unique, tempo-locked dance routines**. Every 16 beats, she randomly switches her style so the animation stays fresh throughout a full song.
+
+Her movement is built from three composable layers, the same way a real puppeteer works:
+* **Groove Spring** — a physics-driven bob that gets a "kick" on every beat (harder on downbeats), so she never looks like she's marching to a metronome.
+* **Keyframed Moves** — every pose change plays a cartoon-style *anticipation → hit → settle* sequence: she winds up opposite the move, snaps through with overshoot, then lands on the pose.
+* **Syncopation & Breathing** — at 90+ BPM she adds half-beat "and" accents (counter-kicks, eye darts, LED flickers), and her bellows pump on the downbeats like she's breathing with the music.
 
 Her personality shifts depending on the speed of the music:
 * **Chill & Soulful (< 90 BPM):** Fluid, heavily relaxed movements. Half-note vertical nods, wide figure-8 sweeps, and heavy eyelids.
@@ -97,6 +102,7 @@ The card source lives in small, focused ES modules under `src/` and is bundled i
 | `src/behaviors/dance.js` | BPM-synced choreography engine |
 | `src/behaviors/talk.js` | Responding-state talk animation |
 | `src/behaviors/bop.js` | Spring-physics tap bop |
+| `src/behaviors/spring.js` | Shared damped-oscillator spring physics |
 
 ### Building
 

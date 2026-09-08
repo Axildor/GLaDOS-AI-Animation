@@ -1,14 +1,16 @@
 /**
  * behaviors/bop.js — Spring-physics tap bop.
  *
- * Fixed-timestep damped harmonic oscillator drives the head; LED brightness
- * tracks displacement. Interruptible: re-tapping mid-bop injects velocity.
- * On settle, restores saved LED/lid state and restarts idle behaviors.
+ * Fixed-timestep damped harmonic oscillator (shared spring.js) drives the
+ * head; LED brightness tracks displacement. Interruptible: re-tapping
+ * mid-bop injects velocity. On settle, restores saved LED/lid state and
+ * restarts idle behaviors.
  *
  * Tracked resource name: 'bop-raf'.
  */
 
 import { startLidBehavior, stopLidBehavior, startIdleCycle } from './idle.js';
+import { createSpring } from './spring.js';
 
 export function bopHead(card) {
   const a = card.animator;
@@ -21,12 +23,10 @@ export function bopHead(card) {
   const maxAmp = 15 * intensity;
   const omega = 0.28 * Math.max(0.01, backendSpeed);
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
-  const damping = 2 * omega * dampingRatio;
-  const stiffness = omega * omega;
   const initialVelocity = maxAmp * omega * 1.8;
 
   if (card._bopping) {
-    card._bopVelocity = initialVelocity;
+    card._bopSpring.injectVelocity(initialVelocity);
     return;
   }
 
@@ -38,12 +38,10 @@ export function bopHead(card) {
   const savedLedOpacity = a.currentLedOpacity;
   const savedBaseLid = a.currentBaseLid;
 
-  card._bopPosition = 0;
-  card._bopVelocity = initialVelocity;
+  const spring = createSpring({ omega, dampingRatio });
+  card._bopSpring = spring;
 
   let lastTime = performance.now();
-  let accumulator = 0;
-  const TIME_STEP = 16.666;
   let lastLedUpdate = 0;
 
   a.cancelRaf('bop-raf');
@@ -55,16 +53,9 @@ export function bopHead(card) {
     lastTime = now;
     if (frameTime > 100) frameTime = 16.666;
 
-    accumulator += frameTime;
+    const settled = spring.step(frameTime);
 
-    while (accumulator >= TIME_STEP) {
-      const force = -stiffness * card._bopPosition - damping * card._bopVelocity;
-      card._bopVelocity += force;
-      card._bopPosition += card._bopVelocity;
-      accumulator -= TIME_STEP;
-    }
-
-    if (Math.abs(card._bopPosition) < 0.08 && Math.abs(card._bopVelocity) < 0.08) {
+    if (settled) {
       card._bopping = false;
       a.el.head.style.transition = 'transform 0.4s ease-out';
       a.el.head.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
@@ -74,15 +65,15 @@ export function bopHead(card) {
       return;
     }
 
-    const ty = card._bopPosition;
-    const rot = card._bopPosition * 0.15;
-    const scale = 1.0 - Math.abs(card._bopPosition) * 0.003;
+    const ty = spring.position;
+    const rot = spring.position * 0.15;
+    const scale = 1.0 - Math.abs(spring.position) * 0.003;
     a.el.head.style.transition = 'none';
     a.el.head.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
 
     if (now - lastLedUpdate > 60) {
       lastLedUpdate = now;
-      const normPos = Math.min(1, Math.abs(card._bopPosition) / maxAmp);
+      const normPos = Math.min(1, Math.abs(spring.position) / maxAmp);
       const baseOp = parseFloat(savedLedOpacity) || 0.15;
       const ledOp = baseOp + (1 - baseOp) * normPos;
       a.el.svg.style.setProperty('--led-color', savedLedColor);

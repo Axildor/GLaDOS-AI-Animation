@@ -115,6 +115,7 @@ export function buildTemplate(config) {
         <g id="glados-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
             <g id="glados-head">
+              <g id="head-groove">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
               <g id="Group_White_Casing">
@@ -161,6 +162,7 @@ export function buildTemplate(config) {
               <path d="m 92,359 5,2 v 6 l -5,2 z" fill="#050505"/>
               <path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/>
               <rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/>
+              </g>
             </g>
           </g>
         </g>

@@ -13,6 +13,7 @@ export class GladosAnimator {
     this.el = {
       svg: root.getElementById('glados-svg'),
       head: root.getElementById('glados-head'),
+      headGroove: root.getElementById('head-groove'),
       torsoSwivel: root.getElementById('torso-swivel'),
       hitbox: root.getElementById('hitbox'),
       eyeLayerIdle: root.getElementById('eye-layer-idle'),
@@ -39,6 +40,8 @@ export class GladosAnimator {
     // Centralized resource registry: name -> timer/raf id
     this._timers = new Map();
     this._rafs = new Map();
+    // Tracked WAAPI animations: name -> Animation object
+    this._anims = new Map();
   }
 
   // ---- Tracked scheduling (the ONLY way behaviors may schedule work) ----
@@ -79,12 +82,36 @@ export class GladosAnimator {
     }
   }
 
-  /** Tear down every tracked timer and RAF. */
+  cancelAnim(name) {
+    const anim = this._anims.get(name);
+    if (anim !== undefined) {
+      anim.cancel();
+      this._anims.delete(name);
+    }
+  }
+
+  /**
+   * Play a tracked Web Animations API animation. `keyframes` is an array of
+   * {transform, offset?, easing?} objects; `opts` is {duration, easing, fill}.
+   * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
+   */
+  playAnim(name, el, keyframes, opts) {
+    this.cancelAnim(name);
+    const anim = el.animate(keyframes, opts);
+    // NOTE: finished fill:'forwards' animations keep applying their effect,
+    // so they stay tracked until explicitly cancelled or replaced.
+    this._anims.set(name, anim);
+    return anim;
+  }
+
+  /** Tear down every tracked timer, RAF, and WAAPI animation. */
   stopAll() {
     for (const id of this._timers.values()) clearTimeout(id);
     for (const id of this._rafs.values()) cancelAnimationFrame(id);
+    for (const anim of this._anims.values()) anim.cancel();
     this._timers.clear();
     this._rafs.clear();
+    this._anims.clear();
   }
 
   // ---- Motion primitives (1:1 ports of the original initGlados closures) ----
@@ -121,7 +148,50 @@ export class GladosAnimator {
     this.el.pupil.style.transform = `translate3d(${px}px, ${py}px, 0)`;
     const ey = py * 1.5;
     this.el.eyeball.style.transform = `translate3d(0, ${ey}px, 0)`;
-    this.el.bellows.style.transform = `translate3d(0, ${ey}px, 0)`;
+    this._pupilBellowsY = ey;
+    this._applyBellows(0.15);
+  }
+
+  /**
+   * Keyframed head move over dur seconds. frames is an array of
+   * { pose: [rot, tx, ty, scale], offset?: 0..1, easing?: string }.
+   * Omitting offset 0 lets the move start from the head's current pose.
+   * Played as a tracked WAAPI animation (anticipation -> hit -> settle).
+   */
+  setHeadKeyframes(frames, dur) {
+    const keyframes = frames.map((f) => {
+      const p = f.pose;
+      const kf = {
+        transform: `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`,
+      };
+      if (f.offset !== undefined) kf.offset = f.offset;
+      if (f.easing) kf.easing = f.easing;
+      return kf;
+    });
+    return this.playAnim('head-keyframes', this.el.head, keyframes, {
+      duration: dur * 1000,
+      fill: 'forwards',
+    });
+  }
+
+  /**
+   * Pump the bellows: amount in px (positive = compress upward). Composes
+   * with the pupil-driven bellows offset so the two don't clobber each other.
+   */
+  setBellows(amount, dur = 0.15) {
+    this._bellowsPump = amount;
+    this._applyBellows(dur);
+  }
+
+  _applyBellows(dur) {
+    this.el.bellows.style.transition = `transform ${dur}s ease-out`;
+    this.el.bellows.style.transform = `translate3d(0, ${(this._pupilBellowsY || 0) - (this._bellowsPump || 0)}px, 0)`;
+  }
+
+  /** Reset the groove layer transform (spring layer on the head). */
+  resetGroove() {
+    this.cancelRaf('dance-groove-raf');
+    if (this.el.headGroove) this.el.headGroove.style.transform = '';
   }
 
   setLEDs(color, opacity) {

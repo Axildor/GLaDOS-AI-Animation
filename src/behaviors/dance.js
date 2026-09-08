@@ -1,12 +1,23 @@
 /**
- * behaviors/dance.js — BPM-synced choreography engine.
+ * behaviors/dance.js — BPM-synced choreography engine (layered motion).
  *
  * Four tempo tiers (<90, <125, <160, 160+ BPM), each with 8 choreo blocks.
  * Every 16 beats a new random routine is chosen. Beat timing uses
  * performance.now() drift correction so moves stay locked to the music.
  *
- * Tracked resource names: 'dance-step', 'dance-led'.
+ * Motion is composed in layers:
+ *  - Groove spring (head-groove wrapper): continuous Y-bob driven by the
+ *    shared damped oscillator; velocity is injected every beat (downbeats
+ *    harder) and at half-beat syncopation accents for tiers >= 125 BPM.
+ *  - Keyframed pose moves (WAAPI on the head): anticipation -> hit ->
+ *    settle, with wind-up/overshoot scaled by tempo tier.
+ *  - Bellows pump on downbeats, amplitude scaled by tier.
+ *
+ * Tracked resource names: 'dance-step', 'dance-led', 'dance-sync',
+ * 'dance-sync-led', 'dance-groove-raf', 'head-keyframes' (WAAPI).
  */
+
+import { createSpring } from './spring.js';
 
 export function startDanceCycle(card, bpm) {
   const a = card.animator;
@@ -18,6 +29,39 @@ export function startDanceCycle(card, bpm) {
   const beatMs = (60 / currentBpm) * 1000;
   const beatSec = beatMs / 1000;
   let expectedNextTick = performance.now() + beatMs;
+
+  const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
+
+  // ---- Groove spring layer (continuous organic bob on head-groove) ----
+  // Spring period ~2 beats so each injected beat kick produces one visible
+  // bounce that decays into the next.
+  const grooveOmega = Math.max(0.08, Math.min(0.3, (2 * Math.PI * 16.666) / (beatMs * 2)));
+  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.35, settleThreshold: 0.05 });
+  // Peak amplitude ~= velocity / omega; scale by tier (calmer tiers bob less).
+  const kickDown = (5 + tierIdx * 2.5) * grooveOmega;
+  const kickOff = kickDown * 0.55;
+
+  let lastGrooveTime = performance.now();
+  const grooveLoop = (now) => {
+    if (card._state !== 'dancing') return;
+    let frameTime = now - lastGrooveTime;
+    lastGrooveTime = now;
+    if (frameTime > 100) frameTime = 16.666;
+    groove.step(frameTime);
+    if (a.el.headGroove) {
+      a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+    }
+    a.requestRaf('dance-groove-raf', grooveLoop);
+  };
+  a.requestRaf('dance-groove-raf', grooveLoop);
+
+  // ---- Keyframed pose layer state ----
+  let lastPose = [0, 0, 0, 1]; // start every routine from the neutral pose
+  const windup = [0.25, 0.35, 0.45, 0.55][tierIdx];       // anticipation magnitude
+  const overshoot = [1.15, 1.2, 1.25, 1.3][tierIdx];      // hit overshoot factor
+  const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];     // wind-up share of the move
+  const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];  // tier-scaled eye pulse
+  const bellowsPump = [2, 3, 4, 5][tierIdx];              // downbeat pump px
 
   const step = () => {
     if (card._state !== 'dancing') return;
@@ -35,16 +79,35 @@ export function startDanceCycle(card, bpm) {
     const phaseMod8 = dancePhase % 8;
     const dirX = isDownBeat ? 1 : -1;
 
+    // Beat kick into the groove spring: strong on the downbeat, softer offbeat.
+    groove.injectVelocity(isDownBeat ? kickDown : kickOff);
+
     a.setLEDs('#1DB954', '1');
     a.el.eyeHalo.style.opacity = (choreoBlock === 7) ? '0.8' : '0.5';
-    a.el.eyeCenter.style.transform = 'scale(1.2)';
+    a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
+    a.setBellows(bellowsPump, 0.12);
     a.setTimeout('dance-led', () => {
       if (card._state === 'dancing') {
         a.setLEDs('#1DB954', '0.15');
         a.el.eyeHalo.style.opacity = '0.05';
         a.el.eyeCenter.style.transform = 'scale(1)';
+        a.setBellows(0, 0.3);
       }
     }, beatMs * 0.3);
+
+    // Syncopation: half-beat "and" accent for the faster tiers — a small
+    // counter-kick, pupil dart, and LED flicker keep it grooving, not marching.
+    if (tierIdx >= 1) {
+      a.setTimeout('dance-sync', () => {
+        if (card._state !== 'dancing') return;
+        groove.injectVelocity(-kickOff * 0.6);
+        a.setPupil((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4);
+        a.setLEDs('#1DB954', '0.5');
+        a.setTimeout('dance-sync-led', () => {
+          if (card._state === 'dancing') a.setLEDs('#1DB954', '0.15');
+        }, beatMs * 0.15);
+      }, beatMs * 0.5);
+    }
 
     let r = 0, tx = 0, ty = 0, s = 1.0, lid = 0.0, ease = 'ease-in-out';
     let moveDur = beatSec;
@@ -111,7 +174,19 @@ export function startDanceCycle(card, bpm) {
       a.setPupil((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
     }
 
-    a.setHead(r, tx, ty, s, moveDur, ease);
+    // Keyframed move: from the previous pose, wind up opposite the target,
+    // snap through an overshoot hit, then settle on the target pose.
+    const target = [r, tx, ty, s];
+    const anti = [-r * windup, -tx * windup, -ty * windup, 1 - (s - 1) * windup * 0.5];
+    const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
+    a.setHeadKeyframes([
+      { pose: lastPose, offset: 0, easing: 'ease-in' },
+      { pose: anti, offset: windupFrac, easing: 'ease-out' },
+      { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
+      { pose: target },
+    ], moveDur);
+    lastPose = target;
+
     a.setBodySwivel(r * -0.8, 1, bodyDur);
     a.setBaseLid(lid, beatSec * 0.5);
     executeTick();
@@ -121,6 +196,12 @@ export function startDanceCycle(card, bpm) {
 }
 
 export function stopDanceCycle(card) {
-  card.animator.clearTimeout('dance-step');
-  card.animator.clearTimeout('dance-led');
+  const a = card.animator;
+  a.clearTimeout('dance-step');
+  a.clearTimeout('dance-led');
+  a.clearTimeout('dance-sync');
+  a.clearTimeout('dance-sync-led');
+  a.cancelAnim('head-keyframes');
+  a.resetGroove();
+  a.setBellows(0, 0.3);
 }

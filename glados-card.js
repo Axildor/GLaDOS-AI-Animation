@@ -165,6 +165,7 @@ function buildTemplate(config) {
         <g id="glados-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
             <g id="glados-head">
+              <g id="head-groove">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
               <g id="Group_White_Casing">
@@ -211,6 +212,7 @@ function buildTemplate(config) {
               <path d="m 92,359 5,2 v 6 l -5,2 z" fill="#050505"/>
               <path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/>
               <rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/>
+              </g>
             </g>
           </g>
         </g>
@@ -226,6 +228,7 @@ var GladosAnimator = class {
     this.el = {
       svg: root.getElementById("glados-svg"),
       head: root.getElementById("glados-head"),
+      headGroove: root.getElementById("head-groove"),
       torsoSwivel: root.getElementById("torso-swivel"),
       hitbox: root.getElementById("hitbox"),
       eyeLayerIdle: root.getElementById("eye-layer-idle"),
@@ -248,6 +251,7 @@ var GladosAnimator = class {
     this.currentLedOpacity = "0.15";
     this._timers = /* @__PURE__ */ new Map();
     this._rafs = /* @__PURE__ */ new Map();
+    this._anims = /* @__PURE__ */ new Map();
   }
   // ---- Tracked scheduling (the ONLY way behaviors may schedule work) ----
   setTimeout(name, fn, delay) {
@@ -282,12 +286,32 @@ var GladosAnimator = class {
       this._rafs.delete(name);
     }
   }
-  /** Tear down every tracked timer and RAF. */
+  cancelAnim(name) {
+    const anim = this._anims.get(name);
+    if (anim !== void 0) {
+      anim.cancel();
+      this._anims.delete(name);
+    }
+  }
+  /**
+   * Play a tracked Web Animations API animation. `keyframes` is an array of
+   * {transform, offset?, easing?} objects; `opts` is {duration, easing, fill}.
+   * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
+   */
+  playAnim(name, el, keyframes, opts) {
+    this.cancelAnim(name);
+    const anim = el.animate(keyframes, opts);
+    this._anims.set(name, anim);
+    return anim;
+  }
+  /** Tear down every tracked timer, RAF, and WAAPI animation. */
   stopAll() {
     for (const id of this._timers.values()) clearTimeout(id);
     for (const id of this._rafs.values()) cancelAnimationFrame(id);
+    for (const anim of this._anims.values()) anim.cancel();
     this._timers.clear();
     this._rafs.clear();
+    this._anims.clear();
   }
   // ---- Motion primitives (1:1 ports of the original initGlados closures) ----
   setHead(rot, tx, ty, scale = 1, dur, ease = "cubic-bezier(0.34,1.06,0.64,1)") {
@@ -317,7 +341,46 @@ var GladosAnimator = class {
     this.el.pupil.style.transform = `translate3d(${px}px, ${py}px, 0)`;
     const ey = py * 1.5;
     this.el.eyeball.style.transform = `translate3d(0, ${ey}px, 0)`;
-    this.el.bellows.style.transform = `translate3d(0, ${ey}px, 0)`;
+    this._pupilBellowsY = ey;
+    this._applyBellows(0.15);
+  }
+  /**
+   * Keyframed head move over dur seconds. frames is an array of
+   * { pose: [rot, tx, ty, scale], offset?: 0..1, easing?: string }.
+   * Omitting offset 0 lets the move start from the head's current pose.
+   * Played as a tracked WAAPI animation (anticipation -> hit -> settle).
+   */
+  setHeadKeyframes(frames, dur) {
+    const keyframes = frames.map((f) => {
+      const p = f.pose;
+      const kf = {
+        transform: `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`
+      };
+      if (f.offset !== void 0) kf.offset = f.offset;
+      if (f.easing) kf.easing = f.easing;
+      return kf;
+    });
+    return this.playAnim("head-keyframes", this.el.head, keyframes, {
+      duration: dur * 1e3,
+      fill: "forwards"
+    });
+  }
+  /**
+   * Pump the bellows: amount in px (positive = compress upward). Composes
+   * with the pupil-driven bellows offset so the two don't clobber each other.
+   */
+  setBellows(amount, dur = 0.15) {
+    this._bellowsPump = amount;
+    this._applyBellows(dur);
+  }
+  _applyBellows(dur) {
+    this.el.bellows.style.transition = `transform ${dur}s ease-out`;
+    this.el.bellows.style.transform = `translate3d(0, ${(this._pupilBellowsY || 0) - (this._bellowsPump || 0)}px, 0)`;
+  }
+  /** Reset the groove layer transform (spring layer on the head). */
+  resetGroove() {
+    this.cancelRaf("dance-groove-raf");
+    if (this.el.headGroove) this.el.headGroove.style.transform = "";
   }
   setLEDs(color, opacity) {
     this.currentLedColor = color;
@@ -524,6 +587,45 @@ function stopIdleCycle2(card) {
   card.animator.cancelRaf("idle-glitch");
 }
 
+// src/behaviors/spring.js
+var TIME_STEP = 16.666;
+function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
+  const stiffness = omega * omega;
+  const damping = 2 * omega * dampingRatio;
+  const spring = {
+    position: 0,
+    velocity: 0,
+    _accumulator: 0,
+    injectVelocity(v) {
+      spring.velocity += v;
+    },
+    reset() {
+      spring.position = 0;
+      spring.velocity = 0;
+      spring._accumulator = 0;
+    },
+    /**
+     * Advance the simulation by dtMs of wall time using fixed sub-steps.
+     * Returns true once the spring has settled (pos & vel below threshold).
+     */
+    step(dtMs) {
+      spring._accumulator += dtMs;
+      let settled = true;
+      while (spring._accumulator >= TIME_STEP) {
+        const force = -stiffness * spring.position - damping * spring.velocity;
+        spring.velocity += force;
+        spring.position += spring.velocity;
+        spring._accumulator -= TIME_STEP;
+        if (Math.abs(spring.position) >= settleThreshold || Math.abs(spring.velocity) >= settleThreshold) {
+          settled = false;
+        }
+      }
+      return settled;
+    }
+  };
+  return spring;
+}
+
 // src/behaviors/dance.js
 function startDanceCycle(card, bpm) {
   const a = card.animator;
@@ -534,6 +636,30 @@ function startDanceCycle(card, bpm) {
   const beatMs = 60 / currentBpm * 1e3;
   const beatSec = beatMs / 1e3;
   let expectedNextTick = performance.now() + beatMs;
+  const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
+  const grooveOmega = Math.max(0.08, Math.min(0.3, 2 * Math.PI * 16.666 / (beatMs * 2)));
+  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.35, settleThreshold: 0.05 });
+  const kickDown = (5 + tierIdx * 2.5) * grooveOmega;
+  const kickOff = kickDown * 0.55;
+  let lastGrooveTime = performance.now();
+  const grooveLoop = (now) => {
+    if (card._state !== "dancing") return;
+    let frameTime = now - lastGrooveTime;
+    lastGrooveTime = now;
+    if (frameTime > 100) frameTime = 16.666;
+    groove.step(frameTime);
+    if (a.el.headGroove) {
+      a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
+    }
+    a.requestRaf("dance-groove-raf", grooveLoop);
+  };
+  a.requestRaf("dance-groove-raf", grooveLoop);
+  let lastPose = [0, 0, 0, 1];
+  const windup = [0.25, 0.35, 0.45, 0.55][tierIdx];
+  const overshoot = [1.15, 1.2, 1.25, 1.3][tierIdx];
+  const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
+  const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];
+  const bellowsPump = [2, 3, 4, 5][tierIdx];
   const step = () => {
     if (card._state !== "dancing") return;
     if (dancePhase > 0 && dancePhase % 16 === 0) {
@@ -549,16 +675,30 @@ function startDanceCycle(card, bpm) {
     const phaseMod4 = dancePhase % 4;
     const phaseMod8 = dancePhase % 8;
     const dirX = isDownBeat ? 1 : -1;
+    groove.injectVelocity(isDownBeat ? kickDown : kickOff);
     a.setLEDs("#1DB954", "1");
     a.el.eyeHalo.style.opacity = choreoBlock === 7 ? "0.8" : "0.5";
-    a.el.eyeCenter.style.transform = "scale(1.2)";
+    a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
+    a.setBellows(bellowsPump, 0.12);
     a.setTimeout("dance-led", () => {
       if (card._state === "dancing") {
         a.setLEDs("#1DB954", "0.15");
         a.el.eyeHalo.style.opacity = "0.05";
         a.el.eyeCenter.style.transform = "scale(1)";
+        a.setBellows(0, 0.3);
       }
     }, beatMs * 0.3);
+    if (tierIdx >= 1) {
+      a.setTimeout("dance-sync", () => {
+        if (card._state !== "dancing") return;
+        groove.injectVelocity(-kickOff * 0.6);
+        a.setPupil((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4);
+        a.setLEDs("#1DB954", "0.5");
+        a.setTimeout("dance-sync-led", () => {
+          if (card._state === "dancing") a.setLEDs("#1DB954", "0.15");
+        }, beatMs * 0.15);
+      }, beatMs * 0.5);
+    }
     let r = 0, tx = 0, ty = 0, s = 1, lid = 0, ease = "ease-in-out";
     let moveDur = beatSec;
     let bodyDur = beatSec * 2;
@@ -750,7 +890,16 @@ function startDanceCycle(card, bpm) {
       }
       a.setPupil((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
     }
-    a.setHead(r, tx, ty, s, moveDur, ease);
+    const target = [r, tx, ty, s];
+    const anti = [-r * windup, -tx * windup, -ty * windup, 1 - (s - 1) * windup * 0.5];
+    const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
+    a.setHeadKeyframes([
+      { pose: lastPose, offset: 0, easing: "ease-in" },
+      { pose: anti, offset: windupFrac, easing: "ease-out" },
+      { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+      { pose: target }
+    ], moveDur);
+    lastPose = target;
     a.setBodySwivel(r * -0.8, 1, bodyDur);
     a.setBaseLid(lid, beatSec * 0.5);
     executeTick();
@@ -758,8 +907,14 @@ function startDanceCycle(card, bpm) {
   step();
 }
 function stopDanceCycle(card) {
-  card.animator.clearTimeout("dance-step");
-  card.animator.clearTimeout("dance-led");
+  const a = card.animator;
+  a.clearTimeout("dance-step");
+  a.clearTimeout("dance-led");
+  a.clearTimeout("dance-sync");
+  a.clearTimeout("dance-sync-led");
+  a.cancelAnim("head-keyframes");
+  a.resetGroove();
+  a.setBellows(0, 0.3);
 }
 
 // src/behaviors/talk.js
@@ -803,11 +958,9 @@ function bopHead(card) {
   const maxAmp = 15 * intensity;
   const omega = 0.28 * Math.max(0.01, backendSpeed);
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
-  const damping = 2 * omega * dampingRatio;
-  const stiffness = omega * omega;
   const initialVelocity = maxAmp * omega * 1.8;
   if (card._bopping) {
-    card._bopVelocity = initialVelocity;
+    card._bopSpring.injectVelocity(initialVelocity);
     return;
   }
   card._bopping = true;
@@ -816,11 +969,9 @@ function bopHead(card) {
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
   const savedBaseLid = a.currentBaseLid;
-  card._bopPosition = 0;
-  card._bopVelocity = initialVelocity;
+  const spring = createSpring({ omega, dampingRatio });
+  card._bopSpring = spring;
   let lastTime = performance.now();
-  let accumulator = 0;
-  const TIME_STEP = 16.666;
   let lastLedUpdate = 0;
   a.cancelRaf("bop-raf");
   const animate = (now) => {
@@ -828,14 +979,8 @@ function bopHead(card) {
     let frameTime = now - lastTime;
     lastTime = now;
     if (frameTime > 100) frameTime = 16.666;
-    accumulator += frameTime;
-    while (accumulator >= TIME_STEP) {
-      const force = -stiffness * card._bopPosition - damping * card._bopVelocity;
-      card._bopVelocity += force;
-      card._bopPosition += card._bopVelocity;
-      accumulator -= TIME_STEP;
-    }
-    if (Math.abs(card._bopPosition) < 0.08 && Math.abs(card._bopVelocity) < 0.08) {
+    const settled = spring.step(frameTime);
+    if (settled) {
       card._bopping = false;
       a.el.head.style.transition = "transform 0.4s ease-out";
       a.el.head.style.transform = "translate3d(0,0,0) rotate(0deg) scale(1)";
@@ -847,14 +992,14 @@ function bopHead(card) {
       }
       return;
     }
-    const ty = card._bopPosition;
-    const rot = card._bopPosition * 0.15;
-    const scale = 1 - Math.abs(card._bopPosition) * 3e-3;
+    const ty = spring.position;
+    const rot = spring.position * 0.15;
+    const scale = 1 - Math.abs(spring.position) * 3e-3;
     a.el.head.style.transition = "none";
     a.el.head.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     if (now - lastLedUpdate > 60) {
       lastLedUpdate = now;
-      const normPos = Math.min(1, Math.abs(card._bopPosition) / maxAmp);
+      const normPos = Math.min(1, Math.abs(spring.position) / maxAmp);
       const baseOp = parseFloat(savedLedOpacity) || 0.15;
       const ledOp = baseOp + (1 - baseOp) * normPos;
       a.el.svg.style.setProperty("--led-color", savedLedColor);
@@ -981,8 +1126,7 @@ var GladosCard = class extends HTMLElement {
     this._state = "idle";
     this._currentBpm = 120;
     this._bopping = false;
-    this._bopPosition = 0;
-    this._bopVelocity = 0;
+    this._bopSpring = null;
     this.animator = null;
     this.contentReady = false;
   }

@@ -23,8 +23,7 @@ export class GladosCard extends HTMLElement {
     this._state = 'idle';
     this._currentBpm = 120;
     this._bopping = false;
-    this._bopPosition = 0;
-    this._bopVelocity = 0;
+    this._bopSpring = null;
     this.animator = null;
     this.contentReady = false;
   }
