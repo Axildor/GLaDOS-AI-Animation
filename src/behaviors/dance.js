@@ -234,7 +234,10 @@ export function startDanceCycle(card, bpm) {
         { pose: target },
       ];
     }
-    a.setHeadKeyframes(frames, moveDur);
+    // Thread the tracked lastPose through as the frozen transform so the
+    // cancel-snap guard in playAnim() doesn't need a getComputedStyle()
+    // forced style recalc on every beat (expensive on tablet CPUs).
+    a.setHeadKeyframes(frames, moveDur, lastPose);
     lastPose = target;
 
     a.setBodySwivel(r * -0.8, 1, bodyDur);

@@ -200,10 +200,27 @@ function buildTemplate(config) {
   return `
     <style>
       :host { display: flex; align-items: center; justify-content: center; ${bgStyle} border-radius: var(--ha-card-border-radius, 12px); overflow: hidden; width: 100%; }
-      #scene { position: relative; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; }
+      /* contain: layout paint \u2014 repaints inside the card never invalidate the
+         dashboard around it (and vice versa) on weak tablet GPUs. */
+      #scene { position: relative; width: ${width}px; height: ${height}px; display: flex; align-items: center; justify-content: center; contain: layout paint; }
 
       #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
-      #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; --led-color: #ffb800; --led-opacity: 0.15; }
+      /* isolation: isolate \u2014 the SVG forms its own stacking context so its
+         compositor layers don't interleave with the rest of the dashboard. */
+      #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; isolation: isolate; --led-color: #ffb800; --led-opacity: 0.15; }
+
+      /* ---- Compositor-layer promotion ----
+         Every group animated via transform gets will-change: transform so the
+         browser hoists it to its own GPU layer: per-frame transform writes
+         (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
+         the GPU instead of triggering main-thread SVG repaints. Applied ONLY
+         to groups that actually animate \u2014 each hint costs GPU memory. */
+      #glados-head, #head-groove, #torso-swivel, #bellows,
+      #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
+        will-change: transform;
+      }
+      /* Rotation/scale groups need view-box coordinates for transform-origin. */
+      #glados-head, #torso-swivel, #eye-center { transform-box: view-box; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
       .led-matrix.pulsing .led-dot { animation: led-pulse 0.9s ease-in-out infinite; }
@@ -240,7 +257,19 @@ function buildTemplate(config) {
           <radialGradient id="eyeGradProcess" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffddaa"/><stop offset="60%" stop-color="#ff6600"/><stop offset="85%" stop-color="#aa3300"/><stop offset="100%" stop-color="#220a00"/></radialGradient>
           <radialGradient id="eyeGradRespond" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffaaaa"/><stop offset="60%" stop-color="#ff2200"/><stop offset="85%" stop-color="#aa0000"/><stop offset="100%" stop-color="#220000"/></radialGradient>
           <radialGradient id="eyeGradDance" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffffff"/><stop offset="20%" stop-color="#aaffaa"/><stop offset="55%" stop-color="#1DB954"/><stop offset="80%" stop-color="#0a5926"/><stop offset="100%" stop-color="#001a00"/></radialGradient>
+          <!-- softGlow is kept ONLY for the static faceplate inset (never
+               animates, rasterized once). Moving elements must NOT use SVG
+               filters: feGaussianBlur re-rasterizes on every transform write
+               and defeats compositor-layer promotion on Android WebView. -->
           <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <!-- Fake glow: pre-blurred radial gradient, rasterized once and
+               cached as a texture. Replaces filter: url(#softGlow) on the
+               eye layers + indicator dot. -->
+          <radialGradient id="glowGrad" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9"/>
+            <stop offset="45%" stop-color="#ffffff" stop-opacity="0.35"/>
+            <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+          </radialGradient>
           <radialGradient id="haloGradIdle"><stop offset="0%" stop-color="#330800" stop-opacity="1"/><stop offset="60%" stop-color="#330800" stop-opacity="0.4"/><stop offset="100%" stop-color="#330800" stop-opacity="0"/></radialGradient>
           <radialGradient id="haloGradDance"><stop offset="0%" stop-color="#1DB954" stop-opacity="1"/><stop offset="60%" stop-color="#1DB954" stop-opacity="0.4"/><stop offset="100%" stop-color="#1DB954" stop-opacity="0"/></radialGradient>
           <radialGradient id="haloGradListen"><stop offset="0%" stop-color="#00ccff" stop-opacity="1"/><stop offset="60%" stop-color="#00ccff" stop-opacity="0.4"/><stop offset="100%" stop-color="#00ccff" stop-opacity="0"/></radialGradient>
@@ -325,14 +354,19 @@ function buildTemplate(config) {
                     <circle cx="130" cy="364" r="26" fill="#1c1e22" stroke="#000000" stroke-width="2"/>
                     <circle cx="130" cy="364" r="23" fill="#0a0b0c"/>
                     <circle cx="147" cy="388" r="3.5" fill="#1a0000" stroke="#000000" stroke-width="1"/>
-                    <circle id="indicator-dot" cx="147" cy="388" r="2.5" fill="#ff2200" opacity="0.8" filter="url(#softGlow)"/>
+                    <circle id="indicator-dot" cx="147" cy="388" r="2.5" fill="#ff2200" opacity="0.8"/>
                     <circle id="eye-halo" cx="130" cy="364" r="25" fill="url(#haloGradIdle)" opacity=".05"/>
                     <g id="eye-pupil" style="transition: transform 0.15s ease-out;">
-                      <circle id="eye-layer-idle" cx="130" cy="364" r="17.6" fill="url(#eyeGradIdle)" filter="url(#softGlow)" class="eye-layer" opacity="1" />
-                      <circle id="eye-layer-listen" cx="130" cy="364" r="17.6" fill="url(#eyeGradListen)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
-                      <circle id="eye-layer-process" cx="130" cy="364" r="17.6" fill="url(#eyeGradProcess)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
-                      <circle id="eye-layer-respond" cx="130" cy="364" r="17.6" fill="url(#eyeGradRespond)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
-                      <circle id="eye-layer-dance" cx="130" cy="364" r="17.6" fill="url(#eyeGradDance)" filter="url(#softGlow)" class="eye-layer" opacity="0" />
+                      <!-- Pre-blurred glow halo (rasterized once) replaces the
+                           per-frame feGaussianBlur that used to sit on each
+                           eye layer \u2014 visually equivalent soft edge, zero
+                           filter cost while the pupil moves. -->
+                      <circle id="eye-glow" cx="130" cy="364" r="21" fill="url(#glowGrad)" opacity="0.55" pointer-events="none"/>
+                      <circle id="eye-layer-idle" cx="130" cy="364" r="17.6" fill="url(#eyeGradIdle)" class="eye-layer" opacity="1" />
+                      <circle id="eye-layer-listen" cx="130" cy="364" r="17.6" fill="url(#eyeGradListen)" class="eye-layer" opacity="0" />
+                      <circle id="eye-layer-process" cx="130" cy="364" r="17.6" fill="url(#eyeGradProcess)" class="eye-layer" opacity="0" />
+                      <circle id="eye-layer-respond" cx="130" cy="364" r="17.6" fill="url(#eyeGradRespond)" class="eye-layer" opacity="0" />
+                      <circle id="eye-layer-dance" cx="130" cy="364" r="17.6" fill="url(#eyeGradDance)" class="eye-layer" opacity="0" />
                       <circle id="eye-center" cx="130" cy="364" r="6.6" fill="#ffe855" />
                       <circle cx="128" cy="362" r="2.2" fill="#ffffff" opacity="0.7" />
                     </g>
@@ -431,10 +465,19 @@ var GladosAnimator = class {
    * Play a tracked Web Animations API animation. `keyframes` is an array of
    * {transform, offset?, easing?} objects; `opts` is {duration, easing, fill}.
    * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
+   *
+   * `frozenTransform` (optional): the element's current transform as a CSS
+   * string, supplied by the caller when it already knows the live pose (e.g.
+   * dance.js tracks lastPose). Supplying it avoids a getComputedStyle() call
+   * — a forced synchronous style recalc — on every animation start, which
+   * matters on slow tablet CPUs where each recalc eats frame budget.
    */
-  playAnim(name, el, keyframes, opts) {
+  playAnim(name, el, keyframes, opts, frozenTransform) {
     try {
-      const t = getComputedStyle(el).transform;
+      let t = frozenTransform;
+      if (!t) {
+        t = getComputedStyle(el).transform;
+      }
       if (t && t !== "none") {
         el.style.transition = "none";
         el.style.transform = t;
@@ -491,8 +534,12 @@ var GladosAnimator = class {
    * { pose: [rot, tx, ty, scale], offset?: 0..1, easing?: string }.
    * Omitting offset 0 lets the move start from the head's current pose.
    * Played as a tracked WAAPI animation (anticipation -> hit -> settle).
+   *
+   * `currentPose` (optional): the head's live pose [rot, tx, ty, scale] as
+   * already tracked by the caller (dance.js lastPose). Used to build the
+   * cancel-snap freeze transform without a getComputedStyle() recalc.
    */
-  setHeadKeyframes(frames, dur) {
+  setHeadKeyframes(frames, dur, currentPose) {
     const keyframes = frames.map((f) => {
       const p = f.pose;
       const kf = {
@@ -502,10 +549,15 @@ var GladosAnimator = class {
       if (f.easing) kf.easing = f.easing;
       return kf;
     });
+    let frozen;
+    if (currentPose) {
+      const p = currentPose;
+      frozen = `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`;
+    }
     return this.playAnim("head-keyframes", this.el.head, keyframes, {
       duration: dur * 1e3,
       fill: "forwards"
-    });
+    }, frozen);
   }
   /**
    * Pump the bellows: amount in px (positive = compress upward). Composes
@@ -1072,7 +1124,7 @@ function startDanceCycle(card, bpm) {
         { pose: target }
       ];
     }
-    a.setHeadKeyframes(frames, moveDur);
+    a.setHeadKeyframes(frames, moveDur, lastPose);
     lastPose = target;
     a.setBodySwivel(r * -0.8, 1, bodyDur);
     a.setBaseLid(lid, beatSec * 0.5);
