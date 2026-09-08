@@ -49,7 +49,9 @@ export function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
     step(dtMs) {
       spring._accumulator += dtMs;
       let settled = true;
+      let stepped = false;
       while (spring._accumulator >= TIME_STEP) {
+        stepped = true;
         const force = -stiffness * spring.position - damping * spring.velocity;
         spring.velocity += force;
         spring.position += spring.velocity;
@@ -58,7 +60,10 @@ export function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
           settled = false;
         }
       }
-      return settled;
+      // No sub-step ran (dt < TIME_STEP): the spring hasn't moved yet, so it
+      // cannot be settled. Reporting settled here would terminate the bop on
+      // its first frame before any motion is visible.
+      return settled && stepped;
     },
   };
 
