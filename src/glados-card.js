@@ -77,16 +77,27 @@ export class GladosCard extends HTMLElement {
     }
   }
 
-  getCardSize() { return 6; }
-
-  getGridOptions() {
-    return { rows: 4, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
+  getCardSize() {
+    const zoom = this.config?.zoom ?? 85;
+    return Math.max(6, Math.ceil(6 * (zoom / 100)));
   }
 
-  /** Stop all animation resources (timers, RAFs, bop flag). */
+  getGridOptions() {
+    const zoom = this.config?.zoom ?? 85;
+    const scale = zoom / 100;
+    // Sections-view row math: 56px row + 24px gap → slot height = 80·rows − 24.
+    // Size the slot to fit the zoomed 320px-tall scene so zoom > 100 grows the
+    // card instead of clipping the scene and shifting the model downward.
+    // zoom 85 → 4 rows (default), zoom 100 → 5, zoom 200 → 9.
+    const rows = Math.max(4, Math.ceil((320 * scale + 24) / 80));
+    return { rows, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
+  }
+
+  /** Stop all animation resources (timers, RAFs, bop flag + spring). */
   _teardownAnimation() {
     if (this.animator) this.animator.stopAll();
     this._bopping = false;
+    this._bopSpring = null;
   }
 
   // Double rAF Kinetic Reflow completely flushes frozen WebKit SVG timelines

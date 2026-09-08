@@ -98,6 +98,13 @@ export function buildEditorForm() {
                   number: { min: 1, max: 20, step: 1, mode: 'slider' },
                 },
               },
+              {
+                name: 'tap_bop_resume',
+                default: 0.3,
+                selector: {
+                  number: { min: 0.05, max: 0.8, step: 0.05, mode: 'slider' },
+                },
+              },
             ],
           },
         ],
@@ -121,6 +128,7 @@ export function buildEditorForm() {
         tap_speed: 'Animation Speed',
         tap_intensity: 'Bop Intensity',
         tap_bounces: 'Rebound Bounces',
+        tap_bop_resume: 'Idle Resume Point',
       };
       return labels[schema.name];
     },
@@ -133,13 +141,14 @@ export function buildEditorForm() {
         media_entity: 'When this media player plays, GLaDOS dances to the BPM sensor.',
         bpm_entity: 'Sensor providing the current song BPM (e.g. SongBPM-26). Defaults to 120.',
         respond_delay: 'Seconds to wait before switching from Processing to Responding.',
-        zoom: 'Scale percentage of the SVG model inside the card.',
+        zoom: 'Scale percentage of the SVG model inside the card. Above 100 the card grows to keep the model fully visible.',
         transparent_bg: 'Removes the card background, shadow, and border.',
         tap_enabled: 'Plays the bop animation when the card is tapped.',
         tap_action: 'Optional Home Assistant action fired on tap.',
         tap_speed: '0.1 = slow, 0.5 = normal, 2.0 = fast.',
         tap_intensity: 'How far the head pulls back.',
         tap_bounces: 'Full oscillation cycles before settling.',
+        tap_bop_resume: 'Point in the bop tail (fraction of max bounce) where idle/dance head poses resume. Low = resume late, high = resume early.',
       };
       return helpers[schema.name];
     },

@@ -157,9 +157,30 @@ export function startIdleCycle(card) {
   card.animator.setTimeout('idle-behavior', () => runNextIdleBehavior(card), 2000 + Math.random() * 3000);
 }
 
-export function stopIdleCycle(card) {
+/**
+ * Stop only the head-pose idle behaviors (scans, glitches, blinks) while
+ * leaving pupil darting alive. Used by the tap bop: the bop spring owns the
+ * head transform, but the pupil is a separate element and keeps darting so
+ * the model never reads as frozen during the bop.
+ */
+export function stopIdleHeadPoses(card) {
   card.animator.clearTimeout('idle-behavior');
-  card.animator.clearTimeout('idle-pupil');
   card.animator.clearTimeout('idle-blink');
   card.animator.cancelRaf('idle-glitch');
+}
+
+/**
+ * Restart just the head-pose behavior scheduler (pupil darting already
+ * running). Used by the bop tail-resume: idle poses resume while the bop
+ * spring is still finishing its decay on the dedicated #head-bop layer.
+ */
+export function startIdleHeadPoses(card) {
+  if (card._state !== 'idle') return;
+  card.animator.clearTimeout('idle-behavior');
+  card.animator.setTimeout('idle-behavior', () => runNextIdleBehavior(card), 300 + Math.random() * 800);
+}
+
+export function stopIdleCycle(card) {
+  stopIdleHeadPoses(card);
+  card.animator.clearTimeout('idle-pupil');
 }

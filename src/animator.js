@@ -14,6 +14,7 @@ export class GladosAnimator {
       svg: root.getElementById('glados-svg'),
       head: root.getElementById('glados-head'),
       headGroove: root.getElementById('head-groove'),
+      headBop: root.getElementById('head-bop'),
       torsoSwivel: root.getElementById('torso-swivel'),
       hitbox: root.getElementById('hitbox'),
       eyeLayerIdle: root.getElementById('eye-layer-idle'),
@@ -221,6 +222,18 @@ export class GladosAnimator {
   resetGroove() {
     this.cancelRaf('dance-groove-raf');
     if (this.el.headGroove) this.el.headGroove.style.transform = '';
+  }
+
+  /**
+   * Ease-clear the bop layer transform (tap-bop spring layer on the head).
+   * A short transition lets any residual displacement glide back to neutral
+   * instead of snapping when the bop ends or a state change tears it down.
+   */
+  resetBopLayer() {
+    if (this.el.headBop) {
+      this.el.headBop.style.transition = 'transform 0.4s ease-out';
+      this.el.headBop.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
+    }
   }
 
   setLEDs(color, opacity) {

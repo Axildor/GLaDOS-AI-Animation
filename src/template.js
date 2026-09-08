@@ -31,12 +31,17 @@ export function buildTemplate(config) {
          (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
          the GPU instead of triggering main-thread SVG repaints. Applied ONLY
          to groups that actually animate — each hint costs GPU memory. */
-      #glados-head, #head-groove, #torso-swivel, #bellows,
+      #glados-head, #head-groove, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
-      #glados-head, #torso-swivel, #eye-center { transform-box: view-box; }
+      #glados-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
+      /* Bop layer: dedicated transform group for the tap-bop spring so it
+         composes additively with idle poses (#glados-head) and the dance
+         groove bob (#head-groove) instead of fighting over one transform.
+         Pivots at the neck like #glados-head. */
+      #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
       .led-matrix.pulsing .led-dot { animation: led-pulse 0.9s ease-in-out infinite; }
@@ -145,6 +150,7 @@ export function buildTemplate(config) {
           <g id="head-sway-pivot">
             <g id="glados-head">
               <g id="head-groove">
+              <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
               <g id="Group_White_Casing">
@@ -196,6 +202,7 @@ export function buildTemplate(config) {
               <path d="m 92,359 5,2 v 6 l -5,2 z" fill="#050505"/>
               <path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/>
               <rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/>
+              </g>
               </g>
             </g>
           </g>

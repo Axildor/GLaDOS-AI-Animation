@@ -1,15 +1,31 @@
 /**
- * behaviors/bop.js — Spring-physics tap bop.
+ * behaviors/bop.js — Spring-physics tap bop on a dedicated head layer.
  *
  * Fixed-timestep damped harmonic oscillator (shared spring.js) drives the
- * head; LED brightness tracks displacement. Interruptible: re-tapping
- * mid-bop injects velocity. On settle, restores saved LED/lid state and
- * restarts idle behaviors.
+ * #head-bop SVG group — a transform layer nested INSIDE #head-groove, so the
+ * bop composes additively with whatever else is animating the head:
+ *   #glados-head   — idle poses / dance WAAPI keyframes
+ *   #head-groove   — dance groove spring bob
+ *   #head-bop      — tap bop spring (this file)
+ *
+ * Because the bop no longer owns #glados-head's transform, background motion
+ * can keep running during the bop:
+ *  - idle: only the head-pose scheduler pauses on tap; pupil darting and the
+ *    lid loop keep running. Once the spring decays to config.tap_bop_resume
+ *    of its max amplitude, idle head poses RESUME while the tail bounces
+ *    finish — the bop tail "melds" back into the idle animation instead of
+ *    ending on a frozen frame.
+ *  - dancing: dance keyframes, groove, and LEDs are never touched; the bop
+ *    simply plays on top (fixes tap-bop-while-dancing being invisible when
+ *    the bop used to fight dance's per-beat keyframes for one transform).
+ *
+ * Interruptible: re-tapping mid-bop injects velocity. On settle the layer
+ * eases back to identity and saved LED state is restored.
  *
  * Tracked resource name: 'bop-raf'.
  */
 
-import { startLidBehavior, stopLidBehavior, startIdleCycle, stopIdleCycle } from './idle.js';
+import { stopIdleHeadPoses, startIdleHeadPoses } from './idle.js';
 import { createSpring } from './spring.js';
 
 export function bopHead(card) {
@@ -19,6 +35,9 @@ export function bopHead(card) {
   const backendSpeed = config.tap_speed !== undefined ? parseFloat(config.tap_speed) : 0.5;
   const bounces = Math.max(1, Math.min(20, config.tap_bounces !== undefined ? parseInt(config.tap_bounces) : 5));
   const intensity = config.tap_intensity !== undefined ? parseFloat(config.tap_intensity) : 1.0;
+  // Fraction of max amplitude at which background head poses resume during
+  // the tail (the "meld" point). Sanitized to 0.05–0.8, default 0.3.
+  const resumeFrac = config.tap_bop_resume !== undefined ? parseFloat(config.tap_bop_resume) : 0.3;
 
   const maxAmp = 15 * intensity;
   const omega = 0.28 * Math.max(0.01, backendSpeed);
@@ -30,17 +49,16 @@ export function bopHead(card) {
     return;
   }
 
-  stopIdleCycle(card);
-  stopLidBehavior(card);
+  const isDancing = card._state === 'dancing';
 
-  // Cancel any lingering fill:'forwards' WAAPI animation (dance keyframes) —
-  // active WAAPI animations override inline style.transform writes, so the
-  // bop below would be invisible while one is running.
-  a.cancelAnim('head-keyframes');
+  // Idle: pause ONLY the head-pose behaviors (scans, blinks, glitches).
+  // Pupil darting and the lid loop keep running — they drive separate
+  // elements, so nothing conflicts, and the model never reads as frozen.
+  // Dancing: the dance engine is left completely alone.
+  if (!isDancing) stopIdleHeadPoses(card);
 
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
-  const savedBaseLid = a.currentBaseLid;
 
   const spring = createSpring({ omega, dampingRatio });
   // Seed the oscillator: a fresh spring starts at rest and would settle on
@@ -54,6 +72,7 @@ export function bopHead(card) {
 
   let lastTime = performance.now();
   let lastLedUpdate = 0;
+  let resumed = false;
 
   a.cancelRaf('bop-raf');
 
@@ -68,21 +87,38 @@ export function bopHead(card) {
 
     if (settled) {
       card._bopping = false;
-      a.el.head.style.transition = 'transform 0.4s ease-out';
-      a.el.head.style.transform = 'translate3d(0,0,0) rotate(0deg) scale(1)';
-      a.setLEDs(savedLedColor, savedLedOpacity);
-      a.setLid(savedBaseLid, 0.4);
-      if (card._state === 'idle') { startLidBehavior(card); startIdleCycle(card); }
+      card._bopSpring = null;
+      // Ease the bop layer back to identity — any residual sub-pixel
+      // displacement glides home instead of snapping.
+      a.resetBopLayer();
+      if (!isDancing) a.setLEDs(savedLedColor, savedLedOpacity);
+      // Tail-resume safety net: if the resume threshold never tripped
+      // (e.g. an extremely low tap_bop_resume), start idle head poses now.
+      if (card._state === 'idle' && !resumed) startIdleHeadPoses(card);
       return;
     }
 
     const ty = spring.position;
     const rot = spring.position * 0.15;
     const scale = 1.0 - Math.abs(spring.position) * 0.003;
-    a.el.head.style.transition = 'none';
-    a.el.head.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
+    if (a.el.headBop) {
+      a.el.headBop.style.transition = 'none';
+      a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
+    }
 
-    if (now - lastLedUpdate > 60) {
+    // Tail meld: once the bounce decays to the configured fraction of max
+    // amplitude, resume the idle head-pose scheduler while the tail is
+    // still bouncing on the bop layer. Dance never stopped, so there is
+    // nothing to resume in the dancing state.
+    if (!resumed && !isDancing && card._state === 'idle'
+        && Math.abs(spring.position) <= maxAmp * resumeFrac) {
+      resumed = true;
+      startIdleHeadPoses(card);
+    }
+
+    // LED brightness tracks displacement — idle only. During a dance the
+    // beat loop owns the LEDs and would fight this every beat.
+    if (!isDancing && now - lastLedUpdate > 60) {
       lastLedUpdate = now;
       const normPos = Math.min(1, Math.abs(spring.position) / maxAmp);
       const baseOp = parseFloat(savedLedOpacity) || 0.15;
@@ -97,6 +133,11 @@ export function bopHead(card) {
 }
 
 export function stopBop(card) {
+  const wasBopping = card._bopping;
   card._bopping = false;
+  card._bopSpring = null;
   card.animator.cancelRaf('bop-raf');
+  // Ease-clear the layer so a state change mid-bop glides home instead of
+  // snapping. Only needed if a transform was actually written.
+  if (wasBopping) card.animator.resetBopLayer();
 }

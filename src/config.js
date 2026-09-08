@@ -21,6 +21,7 @@ export function getStubConfig() {
     tap_speed: 0.5,
     tap_bounces: 5,
     tap_intensity: 1.0,
+    tap_bop_resume: 0.3,
     tap_action: { action: 'none' },
   };
 }
@@ -42,6 +43,10 @@ export function sanitizeConfig(config) {
   c.tap_speed = clampNum(c.tap_speed, 0.5, 0.1, 2.0);
   c.tap_intensity = clampNum(c.tap_intensity, 1.0, 0.5, 2);
   c.tap_bounces = Math.round(clampNum(c.tap_bounces, 5, 1, 20));
+  // Fraction of max bounce amplitude at which idle/dance head poses resume
+  // during the bop tail (the "meld" point). 0.05 = resume very late,
+  // 0.8 = resume almost immediately.
+  c.tap_bop_resume = clampNum(c.tap_bop_resume, 0.3, 0.05, 0.8);
 
   // Normalize legacy string tap_action to standard HA object schema
   if (typeof c.tap_action === 'string') {

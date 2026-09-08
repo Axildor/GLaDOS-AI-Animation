@@ -16,6 +16,7 @@ function getStubConfig() {
     tap_speed: 0.5,
     tap_bounces: 5,
     tap_intensity: 1,
+    tap_bop_resume: 0.3,
     tap_action: { action: "none" }
   };
 }
@@ -29,6 +30,7 @@ function sanitizeConfig(config) {
   c.tap_speed = clampNum(c.tap_speed, 0.5, 0.1, 2);
   c.tap_intensity = clampNum(c.tap_intensity, 1, 0.5, 2);
   c.tap_bounces = Math.round(clampNum(c.tap_bounces, 5, 1, 20));
+  c.tap_bop_resume = clampNum(c.tap_bop_resume, 0.3, 0.05, 0.8);
   if (typeof c.tap_action === "string") {
     c.tap_action = { action: c.tap_action };
   } else if (!c.tap_action) {
@@ -124,6 +126,13 @@ function buildEditorForm() {
                 selector: {
                   number: { min: 1, max: 20, step: 1, mode: "slider" }
                 }
+              },
+              {
+                name: "tap_bop_resume",
+                default: 0.3,
+                selector: {
+                  number: { min: 0.05, max: 0.8, step: 0.05, mode: "slider" }
+                }
               }
             ]
           }
@@ -145,7 +154,8 @@ function buildEditorForm() {
         tap_action: "Tap Action",
         tap_speed: "Animation Speed",
         tap_intensity: "Bop Intensity",
-        tap_bounces: "Rebound Bounces"
+        tap_bounces: "Rebound Bounces",
+        tap_bop_resume: "Idle Resume Point"
       };
       return labels[schema.name];
     },
@@ -158,13 +168,14 @@ function buildEditorForm() {
         media_entity: "When this media player plays, GLaDOS dances to the BPM sensor.",
         bpm_entity: "Sensor providing the current song BPM (e.g. SongBPM-26). Defaults to 120.",
         respond_delay: "Seconds to wait before switching from Processing to Responding.",
-        zoom: "Scale percentage of the SVG model inside the card.",
+        zoom: "Scale percentage of the SVG model inside the card. Above 100 the card grows to keep the model fully visible.",
         transparent_bg: "Removes the card background, shadow, and border.",
         tap_enabled: "Plays the bop animation when the card is tapped.",
         tap_action: "Optional Home Assistant action fired on tap.",
         tap_speed: "0.1 = slow, 0.5 = normal, 2.0 = fast.",
         tap_intensity: "How far the head pulls back.",
-        tap_bounces: "Full oscillation cycles before settling."
+        tap_bounces: "Full oscillation cycles before settling.",
+        tap_bop_resume: "Point in the bop tail (fraction of max bounce) where idle/dance head poses resume. Low = resume late, high = resume early."
       };
       return helpers[schema.name];
     }
@@ -215,12 +226,17 @@ function buildTemplate(config) {
          (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
          the GPU instead of triggering main-thread SVG repaints. Applied ONLY
          to groups that actually animate \u2014 each hint costs GPU memory. */
-      #glados-head, #head-groove, #torso-swivel, #bellows,
+      #glados-head, #head-groove, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
-      #glados-head, #torso-swivel, #eye-center { transform-box: view-box; }
+      #glados-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
+      /* Bop layer: dedicated transform group for the tap-bop spring so it
+         composes additively with idle poses (#glados-head) and the dance
+         groove bob (#head-groove) instead of fighting over one transform.
+         Pivots at the neck like #glados-head. */
+      #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
       .led-matrix.pulsing .led-dot { animation: led-pulse 0.9s ease-in-out infinite; }
@@ -329,6 +345,7 @@ function buildTemplate(config) {
           <g id="head-sway-pivot">
             <g id="glados-head">
               <g id="head-groove">
+              <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
               <g id="Group_White_Casing">
@@ -381,6 +398,7 @@ function buildTemplate(config) {
               <path d="m 92,379 5,2 v 8 l -5,2 z" fill="#050505"/>
               <rect id="danger-ring" x="97" y="283.25" width="66" height="161.5" rx="33" fill="none" stroke="#ff2200" stroke-width="2" opacity="0"/>
               </g>
+              </g>
             </g>
           </g>
         </g>
@@ -397,6 +415,7 @@ var GladosAnimator = class {
       svg: root.getElementById("glados-svg"),
       head: root.getElementById("glados-head"),
       headGroove: root.getElementById("head-groove"),
+      headBop: root.getElementById("head-bop"),
       torsoSwivel: root.getElementById("torso-swivel"),
       hitbox: root.getElementById("hitbox"),
       eyeLayerIdle: root.getElementById("eye-layer-idle"),
@@ -575,6 +594,17 @@ var GladosAnimator = class {
   resetGroove() {
     this.cancelRaf("dance-groove-raf");
     if (this.el.headGroove) this.el.headGroove.style.transform = "";
+  }
+  /**
+   * Ease-clear the bop layer transform (tap-bop spring layer on the head).
+   * A short transition lets any residual displacement glide back to neutral
+   * instead of snapping when the bop ends or a state change tears it down.
+   */
+  resetBopLayer() {
+    if (this.el.headBop) {
+      this.el.headBop.style.transition = "transform 0.4s ease-out";
+      this.el.headBop.style.transform = "translate3d(0,0,0) rotate(0deg) scale(1)";
+    }
   }
   setLEDs(color, opacity) {
     this.currentLedColor = color;
@@ -774,11 +804,19 @@ function startIdleCycle(card) {
   dartPupil(card);
   card.animator.setTimeout("idle-behavior", () => runNextIdleBehavior(card), 2e3 + Math.random() * 3e3);
 }
-function stopIdleCycle(card) {
+function stopIdleHeadPoses(card) {
   card.animator.clearTimeout("idle-behavior");
-  card.animator.clearTimeout("idle-pupil");
   card.animator.clearTimeout("idle-blink");
   card.animator.cancelRaf("idle-glitch");
+}
+function startIdleHeadPoses(card) {
+  if (card._state !== "idle") return;
+  card.animator.clearTimeout("idle-behavior");
+  card.animator.setTimeout("idle-behavior", () => runNextIdleBehavior(card), 300 + Math.random() * 800);
+}
+function stopIdleCycle(card) {
+  stopIdleHeadPoses(card);
+  card.animator.clearTimeout("idle-pupil");
 }
 
 // src/behaviors/spring.js
@@ -1189,6 +1227,7 @@ function bopHead(card) {
   const backendSpeed = config.tap_speed !== void 0 ? parseFloat(config.tap_speed) : 0.5;
   const bounces = Math.max(1, Math.min(20, config.tap_bounces !== void 0 ? parseInt(config.tap_bounces) : 5));
   const intensity = config.tap_intensity !== void 0 ? parseFloat(config.tap_intensity) : 1;
+  const resumeFrac = config.tap_bop_resume !== void 0 ? parseFloat(config.tap_bop_resume) : 0.3;
   const maxAmp = 15 * intensity;
   const omega = 0.28 * Math.max(0.01, backendSpeed);
   const dampingRatio = Math.min(0.7, 0.6 / bounces);
@@ -1197,18 +1236,17 @@ function bopHead(card) {
     card._bopSpring.injectVelocity(initialVelocity);
     return;
   }
-  stopIdleCycle(card);
-  stopLidBehavior(card);
-  a.cancelAnim("head-keyframes");
+  const isDancing = card._state === "dancing";
+  if (!isDancing) stopIdleHeadPoses(card);
   const savedLedColor = a.currentLedColor;
   const savedLedOpacity = a.currentLedOpacity;
-  const savedBaseLid = a.currentBaseLid;
   const spring = createSpring({ omega, dampingRatio });
   spring.injectVelocity(initialVelocity);
   card._bopSpring = spring;
   card._bopping = true;
   let lastTime = performance.now();
   let lastLedUpdate = 0;
+  let resumed = false;
   a.cancelRaf("bop-raf");
   const animate = (now) => {
     if (!card._bopping) return;
@@ -1218,22 +1256,24 @@ function bopHead(card) {
     const settled = spring.step(frameTime);
     if (settled) {
       card._bopping = false;
-      a.el.head.style.transition = "transform 0.4s ease-out";
-      a.el.head.style.transform = "translate3d(0,0,0) rotate(0deg) scale(1)";
-      a.setLEDs(savedLedColor, savedLedOpacity);
-      a.setLid(savedBaseLid, 0.4);
-      if (card._state === "idle") {
-        startLidBehavior(card);
-        startIdleCycle(card);
-      }
+      card._bopSpring = null;
+      a.resetBopLayer();
+      if (!isDancing) a.setLEDs(savedLedColor, savedLedOpacity);
+      if (card._state === "idle" && !resumed) startIdleHeadPoses(card);
       return;
     }
     const ty = spring.position;
     const rot = spring.position * 0.15;
     const scale = 1 - Math.abs(spring.position) * 3e-3;
-    a.el.head.style.transition = "none";
-    a.el.head.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
-    if (now - lastLedUpdate > 60) {
+    if (a.el.headBop) {
+      a.el.headBop.style.transition = "none";
+      a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
+    }
+    if (!resumed && !isDancing && card._state === "idle" && Math.abs(spring.position) <= maxAmp * resumeFrac) {
+      resumed = true;
+      startIdleHeadPoses(card);
+    }
+    if (!isDancing && now - lastLedUpdate > 60) {
       lastLedUpdate = now;
       const normPos = Math.min(1, Math.abs(spring.position) / maxAmp);
       const baseOp = parseFloat(savedLedOpacity) || 0.15;
@@ -1246,8 +1286,11 @@ function bopHead(card) {
   a.requestRaf("bop-raf", animate);
 }
 function stopBop(card) {
+  const wasBopping = card._bopping;
   card._bopping = false;
+  card._bopSpring = null;
   card.animator.cancelRaf("bop-raf");
+  if (wasBopping) card.animator.resetBopLayer();
 }
 
 // src/states.js
@@ -1410,15 +1453,20 @@ var GladosCard = class extends HTMLElement {
     }
   }
   getCardSize() {
-    return 6;
+    const zoom = this.config?.zoom ?? 85;
+    return Math.max(6, Math.ceil(6 * (zoom / 100)));
   }
   getGridOptions() {
-    return { rows: 4, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
+    const zoom = this.config?.zoom ?? 85;
+    const scale = zoom / 100;
+    const rows = Math.max(4, Math.ceil((320 * scale + 24) / 80));
+    return { rows, min_rows: 2, columns: 6, min_columns: 4, max_columns: 12 };
   }
-  /** Stop all animation resources (timers, RAFs, bop flag). */
+  /** Stop all animation resources (timers, RAFs, bop flag + spring). */
   _teardownAnimation() {
     if (this.animator) this.animator.stopAll();
     this._bopping = false;
+    this._bopSpring = null;
   }
   // Double rAF Kinetic Reflow completely flushes frozen WebKit SVG timelines
   connectedCallback() {
