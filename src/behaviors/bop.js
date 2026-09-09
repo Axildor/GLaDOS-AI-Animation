@@ -103,8 +103,12 @@ export function bopHead(card) {
     pauseBackground(card, isDancing);
     card._bopResumeArmed = false;
     card._bopResumed = false;
-    // Re-derive the meld threshold from THIS bounce's peak, not the stale one.
-    card._bopMaxSeen = Math.abs(card._bopSpring.position);
+    // Re-derive the meld threshold from THIS bounce's peak: reset the peak
+    // tracker to 0 and clear the peak-frozen flag so the RAF loop re-detects
+    // the new bounce's true peak. Re-baselining to the CURRENT position would
+    // collapse the threshold to ~0 at a trough and re-fire the early-meld bug.
+    card._bopMaxSeen = 0;
+    card._bopPeakFrozen = false;
     return;
   }
 
@@ -130,10 +134,16 @@ export function bopHead(card) {
   let lastTime = performance.now();
   let lastLedUpdate = 0;
   a.cancelRaf('bop-raf');
-  // The meld threshold is a fraction of the ACTUAL peak (tracked per frame),
-  // not the theoretical maxAmp — the velocity seed overshoots maxAmp by ~1.8x,
-  // so a maxAmp-based threshold fired earlier than the slider implied.
+  // The meld threshold is a fraction of the ACTUAL peak, not the theoretical
+  // maxAmp — the velocity seed overshoots maxAmp by ~1.8x, so a maxAmp-based
+  // threshold fired earlier than the slider implied.
   card._bopMaxSeen = 0;
+  // Peak-frozen flag: the threshold must be computed ONCE from the bounce's
+  // TRUE peak. While the spring is still rising, maxSeen grows every frame and
+  // a moving threshold arms the meld almost immediately (the early-resume bug).
+  // The peak is detected via the velocity sign flip — the first frame the
+  // velocity turns negative, the spring has passed its first positive peak.
+  card._bopPeakFrozen = false;
 
   const animate = (now) => {
     if (!card._bopping) return;
@@ -157,6 +167,7 @@ export function bopHead(card) {
       if (!card._bopResumed) resumeBackground(card, isDancing);
       card._bopResumeArmed = false;
       card._bopResumed = false;
+      card._bopPeakFrozen = false;
       return;
     }
 
@@ -168,22 +179,29 @@ export function bopHead(card) {
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
 
-    // Track the actual peak so the meld threshold is an honest fraction of
-    // the real bounce amplitude.
-    if (Math.abs(spring.position) > card._bopMaxSeen) {
-      card._bopMaxSeen = Math.abs(spring.position);
+    // Track the actual peak while the spring is rising. Once the velocity
+    // flips negative (first descent), the peak is FROZEN — the threshold is
+    // computed from this fixed value for the rest of the bounce, so the
+    // configured resume fraction is honest and the meld cannot fire early.
+    if (!card._bopPeakFrozen) {
+      if (Math.abs(spring.position) > card._bopMaxSeen) {
+        card._bopMaxSeen = Math.abs(spring.position);
+      }
+      if (spring.velocity < 0) {
+        card._bopPeakFrozen = true;
+      }
     }
     const threshold = card._bopMaxSeen * resumeFrac;
 
     // Arm the meld only after the spring has actually bounced ABOVE the
-    // threshold — the first frames ramp up from 0 and would otherwise trip
-    // the check instantly, resuming background motion on frame 1.
+    // frozen threshold — the first frames ramp up from 0 and would otherwise
+    // trip the check instantly, resuming background motion on frame 1.
     if (!card._bopResumeArmed && Math.abs(spring.position) > threshold) {
       card._bopResumeArmed = true;
     }
 
     // Tail meld: once armed and the bounce decays back to the configured
-    // fraction of the ACTUAL peak, resume the background motion (idle head
+    // fraction of the FROZEN peak, resume the background motion (idle head
     // poses / dance choreography) while the tail is still bouncing on the
     // bop layer.
     if (!card._bopResumed && card._bopResumeArmed
@@ -217,6 +235,7 @@ export function stopBop(card) {
   card._bopResumeArmed = false;
   card._bopResumed = false;
   card._bopMaxSeen = 0;
+  card._bopPeakFrozen = false;
   card._danceHeld = false;
   card.animator.cancelRaf('bop-raf');
   // Ease-clear the layer so a state change mid-bop glides home instead of

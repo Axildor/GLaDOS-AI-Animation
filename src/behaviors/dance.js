@@ -8,10 +8,24 @@
  * Motion is composed in layers:
  *  - Groove spring (head-groove wrapper): continuous Y-bob driven by the
  *    shared damped oscillator; velocity is injected every beat (downbeats
- *    harder) and at half-beat syncopation accents for tiers >= 125 BPM.
- *  - Keyframed pose moves (WAAPI on the head): anticipation -> hit ->
- *    settle, with wind-up/overshoot scaled by tempo tier.
+ *    harder, tier 0 downbeats only) and at half-beat syncopation accents
+ *    for tiers >= 125 BPM.
+ *  - Keyframed pose moves (WAAPI on the head): two move styles —
+ *      · HIT moves: anticipation -> overshoot hit -> settle (downbeats),
+ *        direct ease-in-out through a soft overshoot on offbeats.
+ *      · FLOW moves: plain two-keyframe glide with ease-in-out, spanning
+ *        up to ~2 beats. Used by the chill tier and for routine transitions
+ *        so the head is always in motion — no hit-freeze-hit staccato.
  *  - Bellows pump on downbeats, amplitude scaled by tier.
+ *
+ * Smoothness guarantees (the anti-jerkiness contract):
+ *  1. No move is ever cancelled mid-flight without a live-pose reseed: the
+ *     next move starts from where the head ACTUALLY is (readHeadPose) whenever
+ *     the previous move was a flow move that outlived its beat.
+ *  2. Hit moves always finish inside the beat (<= 0.95x) so the head never
+ *     freezes dead between beats.
+ *  3. Routine switches (every 16 beats) ease through a damped transition
+ *     move instead of jumping to the new block's full pose.
  *
  * Tracked resource names: 'dance-step', 'dance-led', 'dance-sync',
  * 'dance-sync-led', 'dance-groove-raf', 'head-keyframes' (WAAPI).
@@ -21,9 +35,10 @@ import { createSpring } from './spring.js';
 
 /**
  * Read the head's live pose [rot, tx, ty, scale] from its computed transform.
- * Used to seed choreography so a (re)start eases from where the head actually
- * is instead of snapping to the neutral pose. Defensive: returns neutral in
- * stub environments where getComputedStyle is unavailable.
+ * Used to seed choreography so a (re)start — or the move after a flow move
+ * that was cut short — eases from where the head actually is instead of
+ * snapping to a stale target. Defensive: returns neutral in stub
+ * environments where getComputedStyle is unavailable.
  */
 function readHeadPose(a) {
   try {
@@ -55,11 +70,15 @@ export function startDanceCycle(card, bpm) {
 
   // ---- Groove spring layer (continuous organic bob on head-groove) ----
   // Spring period ~2 beats so each injected beat kick produces one visible
-  // bounce that decays into the next.
+  // bounce that decays into the next. Damping 0.55 (up from 0.35): the bob
+  // sways instead of wobbling — a bouncy spring fighting the snappy pose
+  // hits is what read as "jerky".
   const grooveOmega = Math.max(0.08, Math.min(0.3, (2 * Math.PI * 16.666) / (beatMs * 2)));
-  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.35, settleThreshold: 0.05 });
+  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.55, settleThreshold: 0.05 });
   // Peak amplitude ~= velocity / omega; scale by tier (calmer tiers bob less).
-  const kickDown = (5 + tierIdx * 2.5) * grooveOmega;
+  // Amplitudes trimmed ~20% from the rework values — the groove should be a
+  // background sway, not a second head-bob fighting the pose layer.
+  const kickDown = (4 + tierIdx * 2) * grooveOmega;
   const kickOff = kickDown * 0.55;
 
   let lastGrooveTime = performance.now();
@@ -88,13 +107,19 @@ export function startDanceCycle(card, bpm) {
   // the first move must ease from where the head actually is, not teleport
   // to a stale neutral pose.
   let lastPose = readHeadPose(a);
-  const windup = [0.25, 0.35, 0.45, 0.55][tierIdx];       // anticipation magnitude
-  const overshoot = [1.15, 1.2, 1.25, 1.3][tierIdx];      // hit overshoot factor
+  const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];        // anticipation magnitude (softened)
+  const overshoot = [1.08, 1.12, 1.18, 1.25][tierIdx];    // hit overshoot factor (softened)
   const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];     // wind-up share of the move
-  const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];  // tier-scaled eye pulse
+  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];   // tier-scaled eye pulse (softened)
   const bellowsPump = [2, 3, 4, 5][tierIdx];              // downbeat pump px
 
   let wasHeld = false;
+  // True when the previous pose move was a FLOW move (duration >= one beat).
+  // Such a move is still in flight when the next beat fires, so the next
+  // move must reseed from the head's LIVE pose (getComputedStyle) instead of
+  // the stale recorded target — otherwise the head snaps mid-glide.
+  let prevMoveFlow = false;
+
   const step = () => {
     if (card._state !== 'dancing') return;
 
@@ -120,12 +145,18 @@ export function startDanceCycle(card, bpm) {
     if (wasHeld) {
       lastPose = readHeadPose(a);
       wasHeld = false;
+      prevMoveFlow = false;
     }
 
+    // Routine rotation every 16 beats. The FIRST move of a new routine is a
+    // damped transition glide (see routineChanged below) so the switch
+    // between styles reads as deliberate, not as a pose teleport.
+    let routineChanged = false;
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;
       do { nextRoutine = Math.floor(Math.random() * 8); } while (nextRoutine === currentRoutine);
       currentRoutine = nextRoutine;
+      routineChanged = true;
     }
 
     const choreoBlock = currentRoutine;
@@ -135,11 +166,18 @@ export function startDanceCycle(card, bpm) {
     const phaseMod8 = dancePhase % 8;
     const dirX = isDownBeat ? 1 : -1;
 
-    // Beat kick into the groove spring: strong on the downbeat, softer offbeat.
-    groove.injectVelocity(isDownBeat ? kickDown : kickOff);
+    // Beat kick into the groove spring: strong on the downbeat, softer
+    // offbeat. Tier 0 kicks on downbeats ONLY — its offbeat pose glide plus
+    // an offbeat spring kick double-bobbed the head (bob-without-dancing).
+    if (currentBpm >= 90 || isDownBeat) {
+      groove.injectVelocity(isDownBeat ? kickDown : kickOff);
+    }
 
     a.setLEDs('#1DB954', '1');
     a.el.eyeHalo.style.opacity = (choreoBlock === 7) ? '0.8' : '0.5';
+    // Eye pulse: #eye-center carries a short CSS transform transition (see
+    // template.js), so this write pulses the pupil organically instead of
+    // snapping it open/closed every beat.
     a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
     a.setBellows(bellowsPump, 0.12);
     a.setTimeout('dance-led', () => {
@@ -152,12 +190,14 @@ export function startDanceCycle(card, bpm) {
     }, beatMs * 0.3);
 
     // Syncopation: half-beat "and" accent for the faster tiers — a small
-    // counter-kick, pupil dart, and LED flicker keep it grooving, not marching.
+    // counter-kick, pupil dart, and LED flicker keep it grooving, not
+    // marching. Counter-kick softened (0.6 -> 0.35 of the offbeat kick): a
+    // hard reverse-kick mid-bounce jerked the groove spring against itself.
     if (tierIdx >= 1) {
       a.setTimeout('dance-sync', () => {
         if (card._state !== 'dancing') return;
-        groove.injectVelocity(-kickOff * 0.6);
-        a.setPupil((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4);
+        groove.injectVelocity(-kickOff * 0.35);
+        a.setPupil((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 3);
         a.setLEDs('#1DB954', '0.5');
         a.setTimeout('dance-sync-led', () => {
           if (card._state === 'dancing') a.setLEDs('#1DB954', '0.15');
@@ -167,11 +207,17 @@ export function startDanceCycle(card, bpm) {
 
     let r = 0, tx = 0, ty = 0, s = 1.0, lid = 0.0, ease = 'ease-in-out';
     let moveDur = beatSec;
-    let bodyDur = beatSec * 2;
+    let bodyDur = beatSec * 3;
+    // FLOW move: two-keyframe ease-in-out glide, no windup, no hit. The head
+    // is always travelling — the opposite of the hit-freeze-hit staccato.
+    let flow = false;
 
     if (currentBpm < 90) {
-      // Chill & Soulful: fluid, heavily relaxed movements
-      moveDur = beatSec * 2; bodyDur = beatSec * 4; ease = 'ease-in-out'; lid = 0.4;
+      // Chill & Soulful: fluid, heavily relaxed movements. EVERY block is a
+      // flow glide spanning ~2 beats; offbeats halve the amplitude instead
+      // of skipping (the old skip made the head bob without dancing).
+      moveDur = beatSec * 1.9; bodyDur = beatSec * 4; ease = 'ease-in-out'; lid = 0.35;
+      flow = true;
       if (choreoBlock === 0) { r = isQuadBeat ? 8 : -8; tx = isQuadBeat ? 5 : -5; ty = 2; }
       else if (choreoBlock === 1) { r = 0; tx = 0; ty = isQuadBeat ? 15 : -5; }
       else if (choreoBlock === 2) { r = Math.sin(dancePhase * Math.PI / 2) * 6; tx = Math.sin(dancePhase * Math.PI / 2) * 5; ty = Math.cos(dancePhase * Math.PI / 4) * 8 + 4; }
@@ -180,9 +226,9 @@ export function startDanceCycle(card, bpm) {
       else if (choreoBlock === 5) { r = isQuadBeat ? 4 : -4; tx = 0; ty = isQuadBeat ? 12 : 2; s = isQuadBeat ? 1.03 : 1.0; }
       else if (choreoBlock === 6) { r = (phaseMod8 === 0) ? 12 : (phaseMod8 === 4) ? -6 : 0; tx = r * 0.5; ty = 8; }
       else { r = 0; tx = 0; ty = 2; s = 1.05; lid = 0.5 + Math.sin(dancePhase * Math.PI / 2) * 0.3; }
-      if (!isDownBeat) return executeTick();
+      if (!isDownBeat) { r *= 0.5; tx *= 0.5; }
     } else if (currentBpm < 125) {
-      // Groovy & Pop: confident and bouncy
+      // Groovy & Pop: confident and bouncy, with hit moves on the beat.
       moveDur = beatSec * 0.8; ease = 'cubic-bezier(0.34, 1.06, 0.64, 1)'; lid = 0.2;
       if (choreoBlock === 0) { r = isDownBeat ? 7 : -7; ty = isDownBeat ? 8 : -2; s = isDownBeat ? 1.02 : 1.0; }
       else if (choreoBlock === 1) { const side = (phaseMod4 < 2) ? 1 : -1; r = side * 8; tx = side * 4; ty = isDownBeat ? 10 : 2; }
@@ -193,7 +239,8 @@ export function startDanceCycle(card, bpm) {
       else if (choreoBlock === 6) { r = dirX * 6; ty = !isDownBeat ? 14 : 0; s = !isDownBeat ? 1.04 : 1.0; }
       else { const side = (dancePhase % 3 === 0) ? -1 : 1; r = side * 8; ty = isDownBeat ? 8 : 0; }
     } else if (currentBpm < 160) {
-      // Upbeat & Club: sharp, high-energy snaps
+      // Upbeat & Club: sharp, high-energy snaps (hits stay punchy here —
+      // this tier is SUPPOSED to hit; the softening is in the overshoot).
       moveDur = beatSec * 0.6; ease = 'cubic-bezier(0.25, 0.8, 0.25, 1)'; lid = isDownBeat ? 0.1 : 0.0;
       if (choreoBlock === 0) { r = isDownBeat ? 12 : -12; tx = isDownBeat ? 6 : -6; ty = isDownBeat ? 10 : -8; s = 1.03; }
       else if (choreoBlock === 1) { r = 0; tx = [8, 0, -8, 0][phaseMod4]; ty = isDownBeat ? 5 : -5; if (phaseMod4 === 3) lid = 0.6; }
@@ -202,69 +249,108 @@ export function startDanceCycle(card, bpm) {
       else if (choreoBlock === 4) { r = [10, 10, -10, -10][phaseMod4]; tx = [5, 5, -5, -5][phaseMod4]; ty = [8, -2, 8, -2][phaseMod4]; }
       else if (choreoBlock === 5) { r = dirX * 10; ty = isDownBeat ? 12 : 4; s = 1.02; moveDur = beatSec * 0.4; ease = 'linear'; }
       else if (choreoBlock === 6) { r = (phaseMod4 === 1 || phaseMod4 === 3) ? 0 : (phaseMod4 === 0 ? 12 : -12); ty = (phaseMod4 === 1 || phaseMod4 === 3) ? 14 : -2; }
-      else { r = isDownBeat ? 12 : 12; tx = isDownBeat ? 8 : 8; ty = isDownBeat ? 8 : -4; if (isDownBeat) moveDur = beatSec * 0.1; else moveDur = beatSec * 0.8; }
-      if (isDownBeat && choreoBlock !== 2) a.setPupil((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 6);
+      else { r = isDownBeat ? 12 : 12; tx = isDownBeat ? 8 : 8; ty = isDownBeat ? 8 : -4; if (isDownBeat) moveDur = beatSec * 0.35; else moveDur = beatSec * 0.8; }
+      // Pupil darts calmed: every quad beat (was every downbeat), smaller
+      // amplitude — darts every beat read as nervous, not groovy.
+      if (isQuadBeat && choreoBlock !== 2) a.setPupil((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 4);
     } else {
-      // Intense & Hardcore: aggressive and chaotic
+      // Intense & Hardcore: aggressive and chaotic — but the chaos lives in
+      // the POSE TARGETS, not in teleporting between them.
       moveDur = beatSec * 0.8; ease = 'linear'; lid = isQuadBeat ? 0.4 : 0.0;
       if (choreoBlock === 0) { r = 0; tx = 0; ty = isDownBeat ? 20 : -10; s = isDownBeat ? 1.08 : 0.95; ease = 'ease-out'; }
       else if (choreoBlock === 1) { r = (Math.random() - 0.5) * 30; tx = (Math.random() - 0.5) * 15; ty = (Math.random() - 0.5) * 15; moveDur = beatSec * 0.5; }
       else if (choreoBlock === 2) { r = isDownBeat ? 18 : -18; tx = isDownBeat ? 10 : -10; ty = 12; }
       else if (choreoBlock === 3) { r = isDownBeat ? 10 : -10; tx = (Math.random() - 0.5) * 20; ty = 15; s = 1.1; a.el.eyeHalo.style.opacity = '0.8'; }
       else if (choreoBlock === 4) { r = isDownBeat ? 25 : -25; tx = isDownBeat ? 15 : -15; ty = isDownBeat ? 15 : -15; }
-      else if (choreoBlock === 5) { r = 0; tx = 0; ty = isDownBeat ? 12 : 2; moveDur = beatSec * 0.3; }
+      else if (choreoBlock === 5) { r = 0; tx = 0; ty = isDownBeat ? 12 : 2; moveDur = beatSec * 0.4; }
       else if (choreoBlock === 6) { r = Math.sin(dancePhase * Math.PI) * 20; tx = Math.sin(dancePhase * Math.PI) * 12; ty = Math.cos(dancePhase * Math.PI / 2) * 15 + 5; }
       else {
-        if (phaseMod4 === 0) { r = 15; ty = 10; s = 1.1; moveDur = beatSec * 0.1; }
+        if (phaseMod4 === 0) { r = 15; ty = 10; s = 1.1; moveDur = beatSec * 0.35; }
         else { r = 15; ty = 10; s = 1.1; moveDur = beatSec * 1.5; }
         a.el.eyeCenter.setAttribute('fill', (dancePhase % 2 === 0) ? '#ff0000' : '#ffffff');
       }
-      a.setPupil((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
+      // Pupil darts calmed: every downbeat (was every beat), smaller amplitude.
+      if (isDownBeat) a.setPupil((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 7);
     }
 
-    // Move-duration clamp: a pose move must (a) finish before the next pose
-    // move starts — otherwise the next beat cancels it mid-flight and the
-    // head teleports — and (b) span essentially the whole interval, otherwise
-    // the head freezes dead between beats ("incomplete movements").
-    // Tier 0 poses every 2 beats; tiers 1-3 pose every beat.
-    if (currentBpm < 90) {
+    // Routine transition (Fix 9): the first move of a new routine glides to
+    // a DAMPED version of the new block's pose — a deliberate style switch,
+    // not a pose teleport. Implemented as a flow move so there is no hit.
+    if (routineChanged) {
+      r *= 0.4; tx *= 0.4; ty *= 0.4; s = 1 + (s - 1) * 0.4;
+      flow = true;
+      moveDur = beatSec * 0.95;
+      ease = 'ease-in-out';
+    }
+
+    // Move-duration clamp (Fix 1): hit moves must finish before the next
+    // beat (<= 0.95x) so they are never cancelled mid-flight and the head
+    // never freezes dead between beats. Flow moves are ALLOWED to outlive
+    // the beat (up to 1.9x) — that is the point: continuous travel — and
+    // the prevMoveFlow reseed below keeps the next move snap-free.
+    if (flow) {
       moveDur = Math.min(moveDur, beatSec * 1.9);
     } else {
-      moveDur = beatSec * 0.95;
+      moveDur = Math.min(moveDur, beatSec * 0.95);
     }
 
-    // Keyframed move: from the previous pose, (optionally) wind up opposite
-    // the target, snap through an overshoot hit, then settle on the target.
-    // The anticipation windup is expressive on tier 0's slow 2-beat moves,
-    // but on faster tiers a reverse-twitch EVERY beat reads as the animation
-    // stuttering against itself — so it fires on downbeats only and shrinks
-    // as tempo rises. Offbeats move directly through an overshoot hit.
+    // Live-pose reseed (Fix 4): if the previous move was a flow move it was
+    // still in flight when this beat fired — the head is somewhere between
+    // the recorded lastPose and its target. Read the ACTUAL pose so the new
+    // move starts where the head is (no mid-glide snap). Hit moves always
+    // finish inside their beat, so the recorded target stays exact for them
+    // and no expensive getComputedStyle recalc is needed.
+    if (prevMoveFlow) {
+      lastPose = readHeadPose(a);
+    }
+
+    // Keyframed move construction (Fix 3):
+    //  - FLOW: two-keyframe ease-in-out glide from the live pose.
+    //  - HIT downbeat: wind up opposite the target (anticipation, shrunk by
+    //    tempo), snap through a SOFT overshoot hit, settle on the target.
+    //  - HIT offbeat: direct ease-in-out through a soft overshoot.
     const target = [r, tx, ty, s];
-    const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
     let frames;
-    if (currentBpm < 90 || isDownBeat) {
-      const wScale = currentBpm < 90 ? 1 : [0.6, 0.4, 0.25][tierIdx - 1];
-      const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+    if (flow) {
       frames = [
-        { pose: lastPose, offset: 0, easing: 'ease-in' },
-        { pose: anti, offset: windupFrac, easing: 'ease-out' },
-        { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
+        { pose: lastPose, offset: 0, easing: 'ease-in-out' },
         { pose: target },
       ];
     } else {
-      frames = [
-        { pose: lastPose, offset: 0, easing: 'ease-in-out' },
-        { pose: hit, offset: 0.5, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
-        { pose: target },
-      ];
+      const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
+      if (isDownBeat) {
+        const wScale = [0.5, 0.3, 0.2, 0.15][tierIdx];
+        const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+        frames = [
+          { pose: lastPose, offset: 0, easing: 'ease-in' },
+          { pose: anti, offset: windupFrac, easing: 'ease-out' },
+          { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.55, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
+          { pose: target },
+        ];
+      } else {
+        frames = [
+          { pose: lastPose, offset: 0, easing: 'ease-in-out' },
+          { pose: hit, offset: 0.55, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
+          { pose: target },
+        ];
+      }
     }
     // Thread the tracked lastPose through as the frozen transform so the
     // cancel-snap guard in playAnim() doesn't need a getComputedStyle()
     // forced style recalc on every beat (expensive on tablet CPUs).
     a.setHeadKeyframes(frames, moveDur, lastPose);
     lastPose = target;
+    prevMoveFlow = flow;
 
-    a.setBodySwivel(r * -0.8, 1, bodyDur);
+    // Body swivel (Fix 10): half the head rotation (was -0.8) over a LONG
+    // ease-in-out sway (3-4 beats) — the torso lags behind the head like a
+    // slow groove instead of twitching with every beat.
+    a.setBodySwivel(r * -0.5, 1, bodyDur);
+
+    // Chill lids (Fix 11): a relaxed floor of lowered lids — "in the zone".
+    // Calm tiers sit deeper; the fast tiers keep a whisper of droop so the
+    // accents (per-block lid values) still read above it.
+    lid = Math.max(lid, currentBpm < 125 ? 0.15 : 0.08);
     a.setBaseLid(lid, beatSec * 0.5);
     executeTick();
   };

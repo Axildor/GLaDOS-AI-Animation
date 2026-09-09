@@ -255,7 +255,11 @@ function buildTemplate(config) {
       #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
       #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
 
-      #eye-halo, #eye-center { transition: fill 0.8s ease-in-out; }
+      #eye-halo { transition: fill 0.8s ease-in-out; }
+      /* Eye pulse: the dance engine scales #eye-center every beat; a short
+         transform transition turns that write into an organic pulse instead
+         of a snap. Kept short so the pulse still lands on the beat. */
+      #eye-center { transition: fill 0.8s ease-in-out, transform 0.18s ease-out; }
       .eye-layer { transition: opacity 0.8s ease-in-out; }
       @keyframes eye-breathe { 0%,100%{opacity:.02} 48%{opacity:.2} }
       #eye-halo.breathing { animation: eye-breathe 8s ease-in-out infinite; }
@@ -844,8 +848,19 @@ function stopIdleHeadPoses(card) {
 }
 function startIdleHeadPoses(card) {
   if (card._state !== "idle") return;
-  card.animator.clearTimeout("idle-behavior");
-  card.animator.setTimeout("idle-behavior", () => runNextIdleBehavior(card), 300 + Math.random() * 800);
+  const a = card.animator;
+  try {
+    const t = getComputedStyle(a.el.head).transform;
+    if (t && t !== "none") {
+      a.el.head.style.transition = "transform 0.6s cubic-bezier(0.34,1.06,0.64,1)";
+      a.el.head.style.transform = t;
+    } else {
+      a.el.head.style.transition = "";
+    }
+  } catch (err) {
+  }
+  a.clearTimeout("idle-behavior");
+  a.setTimeout("idle-behavior", () => runNextIdleBehavior(card), 300 + Math.random() * 800);
 }
 function stopIdleCycle(card) {
   stopIdleHeadPoses(card);
@@ -941,8 +956,8 @@ function startDanceCycle(card, bpm) {
   let expectedNextTick = performance.now() + beatMs;
   const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
   const grooveOmega = Math.max(0.08, Math.min(0.3, 2 * Math.PI * 16.666 / (beatMs * 2)));
-  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.35, settleThreshold: 0.05 });
-  const kickDown = (5 + tierIdx * 2.5) * grooveOmega;
+  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.55, settleThreshold: 0.05 });
+  const kickDown = (4 + tierIdx * 2) * grooveOmega;
   const kickOff = kickDown * 0.55;
   let lastGrooveTime = performance.now();
   const grooveLoop = (now) => {
@@ -960,12 +975,13 @@ function startDanceCycle(card, bpm) {
   };
   a.requestRaf("dance-groove-raf", grooveLoop);
   let lastPose = readHeadPose(a);
-  const windup = [0.25, 0.35, 0.45, 0.55][tierIdx];
-  const overshoot = [1.15, 1.2, 1.25, 1.3][tierIdx];
+  const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];
+  const overshoot = [1.08, 1.12, 1.18, 1.25][tierIdx];
   const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
-  const eyeHitScale = [1.08, 1.15, 1.25, 1.35][tierIdx];
+  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];
   const bellowsPump = [2, 3, 4, 5][tierIdx];
   let wasHeld = false;
+  let prevMoveFlow = false;
   const step = () => {
     if (card._state !== "dancing") return;
     const executeTick = () => {
@@ -987,13 +1003,16 @@ function startDanceCycle(card, bpm) {
     if (wasHeld) {
       lastPose = readHeadPose(a);
       wasHeld = false;
+      prevMoveFlow = false;
     }
+    let routineChanged = false;
     if (dancePhase > 0 && dancePhase % 16 === 0) {
       let nextRoutine;
       do {
         nextRoutine = Math.floor(Math.random() * 8);
       } while (nextRoutine === currentRoutine);
       currentRoutine = nextRoutine;
+      routineChanged = true;
     }
     const choreoBlock = currentRoutine;
     const isDownBeat = dancePhase % 2 === 0;
@@ -1001,7 +1020,9 @@ function startDanceCycle(card, bpm) {
     const phaseMod4 = dancePhase % 4;
     const phaseMod8 = dancePhase % 8;
     const dirX = isDownBeat ? 1 : -1;
-    groove.injectVelocity(isDownBeat ? kickDown : kickOff);
+    if (currentBpm >= 90 || isDownBeat) {
+      groove.injectVelocity(isDownBeat ? kickDown : kickOff);
+    }
     a.setLEDs("#1DB954", "1");
     a.el.eyeHalo.style.opacity = choreoBlock === 7 ? "0.8" : "0.5";
     a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
@@ -1017,8 +1038,8 @@ function startDanceCycle(card, bpm) {
     if (tierIdx >= 1) {
       a.setTimeout("dance-sync", () => {
         if (card._state !== "dancing") return;
-        groove.injectVelocity(-kickOff * 0.6);
-        a.setPupil((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 4);
+        groove.injectVelocity(-kickOff * 0.35);
+        a.setPupil((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 3);
         a.setLEDs("#1DB954", "0.5");
         a.setTimeout("dance-sync-led", () => {
           if (card._state === "dancing") a.setLEDs("#1DB954", "0.15");
@@ -1027,12 +1048,14 @@ function startDanceCycle(card, bpm) {
     }
     let r = 0, tx = 0, ty = 0, s = 1, lid = 0, ease = "ease-in-out";
     let moveDur = beatSec;
-    let bodyDur = beatSec * 2;
+    let bodyDur = beatSec * 3;
+    let flow = false;
     if (currentBpm < 90) {
-      moveDur = beatSec * 2;
+      moveDur = beatSec * 1.9;
       bodyDur = beatSec * 4;
       ease = "ease-in-out";
-      lid = 0.4;
+      lid = 0.35;
+      flow = true;
       if (choreoBlock === 0) {
         r = isQuadBeat ? 8 : -8;
         tx = isQuadBeat ? 5 : -5;
@@ -1069,7 +1092,10 @@ function startDanceCycle(card, bpm) {
         s = 1.05;
         lid = 0.5 + Math.sin(dancePhase * Math.PI / 2) * 0.3;
       }
-      if (!isDownBeat) return executeTick();
+      if (!isDownBeat) {
+        r *= 0.5;
+        tx *= 0.5;
+      }
     } else if (currentBpm < 125) {
       moveDur = beatSec * 0.8;
       ease = "cubic-bezier(0.34, 1.06, 0.64, 1)";
@@ -1147,10 +1173,10 @@ function startDanceCycle(card, bpm) {
         r = isDownBeat ? 12 : 12;
         tx = isDownBeat ? 8 : 8;
         ty = isDownBeat ? 8 : -4;
-        if (isDownBeat) moveDur = beatSec * 0.1;
+        if (isDownBeat) moveDur = beatSec * 0.35;
         else moveDur = beatSec * 0.8;
       }
-      if (isDownBeat && choreoBlock !== 2) a.setPupil((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 6);
+      if (isQuadBeat && choreoBlock !== 2) a.setPupil((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 4);
     } else {
       moveDur = beatSec * 0.8;
       ease = "linear";
@@ -1184,7 +1210,7 @@ function startDanceCycle(card, bpm) {
         r = 0;
         tx = 0;
         ty = isDownBeat ? 12 : 2;
-        moveDur = beatSec * 0.3;
+        moveDur = beatSec * 0.4;
       } else if (choreoBlock === 6) {
         r = Math.sin(dancePhase * Math.PI) * 20;
         tx = Math.sin(dancePhase * Math.PI) * 12;
@@ -1194,7 +1220,7 @@ function startDanceCycle(card, bpm) {
           r = 15;
           ty = 10;
           s = 1.1;
-          moveDur = beatSec * 0.1;
+          moveDur = beatSec * 0.35;
         } else {
           r = 15;
           ty = 10;
@@ -1203,35 +1229,56 @@ function startDanceCycle(card, bpm) {
         }
         a.el.eyeCenter.setAttribute("fill", dancePhase % 2 === 0 ? "#ff0000" : "#ffffff");
       }
-      a.setPupil((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15);
+      if (isDownBeat) a.setPupil((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 7);
     }
-    if (currentBpm < 90) {
+    if (routineChanged) {
+      r *= 0.4;
+      tx *= 0.4;
+      ty *= 0.4;
+      s = 1 + (s - 1) * 0.4;
+      flow = true;
+      moveDur = beatSec * 0.95;
+      ease = "ease-in-out";
+    }
+    if (flow) {
       moveDur = Math.min(moveDur, beatSec * 1.9);
     } else {
-      moveDur = beatSec * 0.95;
+      moveDur = Math.min(moveDur, beatSec * 0.95);
+    }
+    if (prevMoveFlow) {
+      lastPose = readHeadPose(a);
     }
     const target = [r, tx, ty, s];
-    const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
     let frames;
-    if (currentBpm < 90 || isDownBeat) {
-      const wScale = currentBpm < 90 ? 1 : [0.6, 0.4, 0.25][tierIdx - 1];
-      const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+    if (flow) {
       frames = [
-        { pose: lastPose, offset: 0, easing: "ease-in" },
-        { pose: anti, offset: windupFrac, easing: "ease-out" },
-        { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+        { pose: lastPose, offset: 0, easing: "ease-in-out" },
         { pose: target }
       ];
     } else {
-      frames = [
-        { pose: lastPose, offset: 0, easing: "ease-in-out" },
-        { pose: hit, offset: 0.5, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
-        { pose: target }
-      ];
+      const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
+      if (isDownBeat) {
+        const wScale = [0.5, 0.3, 0.2, 0.15][tierIdx];
+        const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+        frames = [
+          { pose: lastPose, offset: 0, easing: "ease-in" },
+          { pose: anti, offset: windupFrac, easing: "ease-out" },
+          { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+          { pose: target }
+        ];
+      } else {
+        frames = [
+          { pose: lastPose, offset: 0, easing: "ease-in-out" },
+          { pose: hit, offset: 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+          { pose: target }
+        ];
+      }
     }
     a.setHeadKeyframes(frames, moveDur, lastPose);
     lastPose = target;
-    a.setBodySwivel(r * -0.8, 1, bodyDur);
+    prevMoveFlow = flow;
+    a.setBodySwivel(r * -0.5, 1, bodyDur);
+    lid = Math.max(lid, currentBpm < 125 ? 0.15 : 0.08);
     a.setBaseLid(lid, beatSec * 0.5);
     executeTick();
   };
@@ -1321,7 +1368,8 @@ function bopHead(card) {
     pauseBackground(card, isDancing);
     card._bopResumeArmed = false;
     card._bopResumed = false;
-    card._bopMaxSeen = Math.abs(card._bopSpring.position);
+    card._bopMaxSeen = 0;
+    card._bopPeakFrozen = false;
     return;
   }
   pauseBackground(card, isDancing);
@@ -1335,6 +1383,7 @@ function bopHead(card) {
   let lastLedUpdate = 0;
   a.cancelRaf("bop-raf");
   card._bopMaxSeen = 0;
+  card._bopPeakFrozen = false;
   const animate = (now) => {
     if (!card._bopping) return;
     let frameTime = now - lastTime;
@@ -1349,6 +1398,7 @@ function bopHead(card) {
       if (!card._bopResumed) resumeBackground(card, isDancing);
       card._bopResumeArmed = false;
       card._bopResumed = false;
+      card._bopPeakFrozen = false;
       return;
     }
     const ty = spring.position;
@@ -1358,8 +1408,13 @@ function bopHead(card) {
       a.el.headBop.style.transition = "none";
       a.el.headBop.style.transform = `translate3d(0, ${ty.toFixed(2)}px, 0) rotate(${rot.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
     }
-    if (Math.abs(spring.position) > card._bopMaxSeen) {
-      card._bopMaxSeen = Math.abs(spring.position);
+    if (!card._bopPeakFrozen) {
+      if (Math.abs(spring.position) > card._bopMaxSeen) {
+        card._bopMaxSeen = Math.abs(spring.position);
+      }
+      if (spring.velocity < 0) {
+        card._bopPeakFrozen = true;
+      }
     }
     const threshold = card._bopMaxSeen * resumeFrac;
     if (!card._bopResumeArmed && Math.abs(spring.position) > threshold) {
@@ -1388,6 +1443,7 @@ function stopBop(card) {
   card._bopResumeArmed = false;
   card._bopResumed = false;
   card._bopMaxSeen = 0;
+  card._bopPeakFrozen = false;
   card._danceHeld = false;
   card.animator.cancelRaf("bop-raf");
   if (wasBopping) card.animator.resetBopLayer();

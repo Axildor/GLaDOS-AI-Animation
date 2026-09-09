@@ -1,15 +1,23 @@
 /**
  * verify_dance_smoothness.mjs — End-to-end verification of the dance
- * jerkiness fixes. Runs the real startDanceCycle() with a stubbed animator
- * and asserts, for every tier (60/110/140/180 BPM) and every choreo block:
+ * smoothness contract. Runs the real startDanceCycle() with a stubbed
+ * animator and asserts, for every tier (70/110/140/180 BPM) and every
+ * choreo block:
  *
- *  1. moveDur <= 0.95x beat interval (tiers 1-3) / <= 1.9x beat (tier 0)
- *     -> no move is ever cancelled mid-flight, no dead freeze between beats.
- *  2. The anticipation windup (anti-pose keyframe) only appears on downbeats
- *     for tiers 1-3; tier 0 keeps it on every (2-beat) move.
- *  3. The first move's keyframe 0 equals the live head pose (pose continuity).
- *  4. playAnim cancel-snap guard: cancelling mid-flight freezes the computed
+ *  1. HIT moves (tiers 1-3) always finish inside the beat (<= 0.95x) —
+ *     no mid-flight cancel, no dead freeze between beats.
+ *  2. FLOW moves (tier 0 + routine transitions) may span up to 1.9x beats
+ *     — continuous travel instead of hit-freeze-hit staccato.
+ *  3. Windup (anti-pose keyframe) only on downbeats for tiers 1-3; tier 0
+ *     is all-flow (2-keyframe glides).
+ *  4. Pose continuity: the first move's keyframe 0 equals the live head
+ *     pose, and the move AFTER a flow move reseeds from the live pose
+ *     (no mid-glide snap).
+ *  5. Routine transitions (every 16 beats) are damped flow moves — the new
+ *     block's first pose amplitude is scaled down, never a full teleport.
+ *  6. playAnim cancel-snap guard: cancelling mid-flight freezes the computed
  *     transform into the inline style (no snap-back frame).
+ *  7. Groove spring sanity: still bounces, with the calmer damping.
  */
 
 import { startDanceCycle, stopDanceCycle } from '../src/behaviors/dance.js';
@@ -39,6 +47,7 @@ function makeAnimator() {
     _rafs: new Map(),
     _anims: new Map(),
     _keyframeCalls: [],
+    _swivelCalls: [],
     setTimeout(name, fn, delay) { this._timers.set(name, { fn, delay }); return name; },
     clearTimeout(name) { this._timers.delete(name); },
     requestRaf(name, fn) { this._rafs.set(name, fn); return name; },
@@ -49,7 +58,8 @@ function makeAnimator() {
       this._anims.set(name, { cancel() {} });
       return { cancel() {} };
     },
-    setHead() {}, setBodySwivel() {}, resetBodySwivel() {},
+    setHead() {}, resetBodySwivel() {},
+    setBodySwivel(rot, sx, dur) { this._swivelCalls.push({ rot, dur }); },
     setHeadKeyframes(frames, dur) {
       this._keyframeCalls.push({ name: 'head-keyframes', keyframes: frames, opts: { duration: dur * 1000 } });
       this._anims.set('head-keyframes', { cancel() {} });
@@ -96,9 +106,10 @@ for (const tier of TIERS) {
   console.log(`\n== ${tier.label} ==`);
   const beatSec = 60 / tier.bpm;
   const beatMs = beatSec * 1000;
-  const maxDur = tier.bpm < 90 ? beatSec * 1.9 : beatSec * 0.95;
+  const hitMax = beatSec * 0.95;
+  const flowMax = beatSec * 1.9;
 
-  // Run 32 beats (4 routine rotations) to cover all 8 choreo blocks.
+  // Run 32 beats (2 routine rotations) to cover all 8 choreo blocks.
   const card = makeCard();
   startDanceCycle(card, tier.bpm);
   runBeats(card, 32);
@@ -106,34 +117,57 @@ for (const tier of TIERS) {
   const calls = card.animator._keyframeCalls;
   assert(calls.length >= 16, `pose moves fired (${calls.length} keyframe calls over 32 beats)`);
 
-  // 1. Duration clamp: every move within [0.5x, maxDur] of the beat interval.
+  // 1+2. Duration contract: hit moves <= 0.95x beat, flow moves <= 1.9x.
+  //      Flow moves are 2-keyframe glides; hit moves have 3 (offbeat) or
+      //      4 (downbeat) keyframes. Routine-change beats (phase 16) are flow.
   let durOk = true;
-  for (const c of calls) {
+  for (let i = 0; i < calls.length; i++) {
+    const c = calls[i];
     const d = c.opts.duration / 1000;
-    if (d > maxDur + 1e-9 || d < beatSec * 0.4) { durOk = false; console.error(`    bad moveDur ${d.toFixed(3)}s (beat ${beatSec.toFixed(3)}s, max ${maxDur.toFixed(3)}s)`); }
+    const isFlow = c.keyframes.length === 2;
+    const max = isFlow ? flowMax : hitMax;
+    if (d > max + 1e-9 || d < beatSec * 0.3) {
+      durOk = false;
+      console.error(`    call ${i}: bad moveDur ${d.toFixed(3)}s (beat ${beatSec.toFixed(3)}s, max ${max.toFixed(3)}s, flow=${isFlow})`);
+    }
   }
-  assert(durOk, `all moveDurs within (0.4x, ${(maxDur / beatSec).toFixed(2)}x) of beat interval — no mid-flight cancel, no dead freeze`);
+  assert(durOk, `all moveDurs within contract (hit <= 0.95x, flow <= 1.9x of ${beatSec.toFixed(3)}s beat) — no mid-flight cancel, no dead freeze`);
 
-  // 2. Windup gating: anti-pose (4-keyframe moves) only on downbeats for tiers 1-3.
-  //    Downbeats are even dancePhase; the first step() call is phase 0 (downbeat).
+  // 3. Keyframe-structure contract.
   if (tier.bpm < 90) {
-    assert(calls.every((c) => c.keyframes.length === 4), 'tier 0 keeps expressive windup on every 2-beat move');
+    assert(calls.every((c) => c.keyframes.length === 2), 'tier 0 is all-flow: every move is a 2-keyframe ease glide');
+    assert(calls.every((c) => c.keyframes[0].easing === 'ease-in-out'), 'tier 0 glides use ease-in-out (no snappy hits)');
   } else {
-    // Reconstruct which calls were downbeats: calls alternate down/off per beat
-    // except tier 0. For tiers 1-3 every beat produces a pose move.
-    let windupOk = true;
+    // Reconstruct which calls were downbeats: phase 0, 2, 4... are
+    // downbeats; phases 16 and 32 are routine-change flow moves.
+    let structOk = true;
     calls.forEach((c, i) => {
-      const isDown = i % 2 === 0; // phase 0, 2, 4... are downbeats
-      const hasAnti = c.keyframes.length === 4;
-      if (isDown !== hasAnti) { windupOk = false; console.error(`    call ${i}: downbeat=${isDown} but windup=${hasAnti}`); }
+      const phase = i; // one pose move per beat for tiers 1-3
+      const isRoutineChange = phase > 0 && phase % 16 === 0;
+      const isDown = phase % 2 === 0;
+      const n = c.keyframes.length;
+      const expected = isRoutineChange ? 2 : isDown ? 4 : 3;
+      if (n !== expected) { structOk = false; console.error(`    call ${i} (phase ${phase}): ${n} keyframes, expected ${expected}`); }
     });
-    assert(windupOk, 'windup (anti-pose) fires on downbeats only; offbeats move directly');
+    assert(structOk, 'windup (anti-pose) on downbeats only; offbeats move directly; routine change is a flow glide');
+  }
+
+  // 5. Routine transition damping: the phase-16 move's target amplitude is
+  //    scaled to 40% — compare its final keyframe against the phase-18 move
+  //    (same routine, full amplitude) for rotation magnitude.
+  if (calls.length > 18) {
+    const trans = calls[16];
+    const full = calls[18];
+    const tRot = Math.abs(trans.keyframes[trans.keyframes.length - 1].pose[0]);
+    const fRot = Math.abs(full.keyframes[full.keyframes.length - 1].pose[0]);
+    assert(trans.keyframes.length === 2 && (fRot === 0 || tRot <= fRot * 0.5 + 1e-9),
+      `routine transition is a damped flow move (rot ${tRot.toFixed(1)} vs full ${fRot.toFixed(1)})`);
   }
 
   stopDanceCycle(card);
 }
 
-// 3. Pose continuity: first keyframe of the first move equals the live head pose.
+// 4a. Pose continuity: first keyframe of the first move equals the live head pose.
 {
   console.log('\n== pose continuity ==');
   const card = makeCard();
@@ -153,7 +187,27 @@ for (const tier of TIERS) {
   stopDanceCycle(card);
 }
 
-// 4. Cancel-snap guard in stopDanceCycle: live pose frozen into inline style.
+// 4b. Flow reseed: the move after a flow move starts from the LIVE pose
+//     (getComputedStyle), not the stale recorded target.
+{
+  console.log('\n== flow reseed ==');
+  // Live pose differs from any recorded target: the reseed must pick it up.
+  const c8 = Math.cos(9 * Math.PI / 180) * 1.01;
+  const s8 = Math.sin(9 * Math.PI / 180) * 1.01;
+  globalThis.getComputedStyle = () => ({ transform: `matrix(${c8.toFixed(6)}, ${s8.toFixed(6)}, 0, ${c8.toFixed(6)}, -2, 5)` });
+  const card = makeCard();
+  startDanceCycle(card, 70); // tier 0: every move is a flow move
+  runBeats(card, 3);
+  const calls = card.animator._keyframeCalls;
+  const after = calls[2]; // third move: previous two were flow
+  const p0 = after.keyframes[0].pose;
+  const reseedOk = Math.abs(p0[0] - 9) < 0.5 && Math.abs(p0[1] - (-2)) < 0.5
+    && Math.abs(p0[2] - 5) < 0.5 && Math.abs(p0[3] - 1.01) < 0.02;
+  assert(reseedOk, `move after flow reseeds from live pose [rot=${p0[0].toFixed(1)}, tx=${p0[1].toFixed(1)}, ty=${p0[2].toFixed(1)}, s=${p0[3].toFixed(2)}]`);
+  stopDanceCycle(card);
+}
+
+// 6. Cancel-snap guard in stopDanceCycle: live pose frozen into inline style.
 {
   console.log('\n== cancel-snap guard ==');
   const card = makeCard();
@@ -165,14 +219,29 @@ for (const tier of TIERS) {
   assert(typeof frozen === 'string' && frozen.includes('matrix') || (frozen || '').includes('translate3d'), `live pose frozen into inline style before cancel ("${frozen}")`);
 }
 
-// 5. Spring sanity: groove spring still bounces (regression check).
+// 7. Spring sanity: groove spring still bounces (regression check) with the
+//    calmer 0.55 damping used by the dance groove layer.
 {
   console.log('\n== groove spring regression ==');
-  const s = createSpring({ omega: 0.2, dampingRatio: 0.35, settleThreshold: 0.05 });
+  const s = createSpring({ omega: 0.2, dampingRatio: 0.55, settleThreshold: 0.05 });
   s.injectVelocity(0.5);
   let peak = 0;
   for (let i = 0; i < 200; i++) { s.step(16.666); peak = Math.max(peak, Math.abs(s.position)); }
   assert(peak > 1 && peak < 20, `groove spring produces visible bounce (peak ${peak.toFixed(2)} px)`);
+}
+
+// 8. Body swivel continuity: swivel duration is multi-beat (slow sway), and
+//    the rotation is half the head rotation (lagging torso, not a twitch).
+{
+  console.log('\n== body swivel continuity ==');
+  const card = makeCard();
+  startDanceCycle(card, 110);
+  runBeats(card, 4);
+  const beatSec = 60 / 110;
+  const swivels = card.animator._swivelCalls;
+  const durOk = swivels.every((s) => s.dur >= beatSec * 2 - 1e-9);
+  assert(swivels.length === 5 && durOk, `swivel duration is multi-beat (${swivels[0]?.dur.toFixed(2)}s vs ${beatSec.toFixed(2)}s beat)`);
+  stopDanceCycle(card);
 }
 
 console.log(failures === 0 ? '\nALL CHECKS PASSED' : `\n${failures} CHECK(S) FAILED`);

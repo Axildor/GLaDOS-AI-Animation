@@ -116,6 +116,7 @@ function makeCard(state, config = {}) {
     _bopResumeArmed: false,
     _bopResumed: false,
     _bopMaxSeen: 0,
+    _bopPeakFrozen: false,
     _danceHeld: false,
   };
 }
@@ -305,7 +306,62 @@ console.log('\n[6] Re-tap mid-bop: velocity injected, background re-paused, meld
     `vMid=${vMid.toFixed(3)} vAfter=${spring1.velocity.toFixed(3)}`);
   check('re-tap re-paused background (idle-behavior cleared)', !a._timers.has('idle-behavior'));
   check('re-tap re-armed meld (armed flag reset)', card._bopResumeArmed === false && card._bopResumed === false);
-  check('re-tap re-baselined maxSeen', card._bopMaxSeen >= 0);
+  check('re-tap re-baselined maxSeen to 0 (not current position)', card._bopMaxSeen === 0);
+  check('re-tap cleared peak-frozen flag (new peak will be detected)', card._bopPeakFrozen === false);
+  stopBop(card);
+}
+
+// ---- 12: FROZEN peak threshold — resume fires at the configured fraction of
+// the TRUE peak, never early. Regression test for the "resumes within a
+// second regardless of Idle Resume Point" bug: the old code let maxSeen grow
+// every frame, so the threshold chased the rising position and armed the meld
+// almost immediately.
+console.log('\n[12] Frozen-peak threshold: meld at configured fraction of TRUE peak');
+{
+  for (const resumeFrac of [0.1, 0.3, 0.6]) {
+    const card = makeCard('idle', { tap_bop_resume: resumeFrac });
+    bopHead(card);
+    const trace = pumpBop(card);
+    const peak = Math.max(...trace.map((f) => Math.abs(f.pos)));
+    const resumedFrame = trace.find((f) => f.idleResumed);
+    check(`resumeFrac ${resumeFrac}: resume fired during bounce`, resumedFrame !== undefined);
+    check(`resumeFrac ${resumeFrac}: meld at configured fraction of TRUE peak`,
+      resumedFrame && Math.abs(resumedFrame.pos) <= peak * resumeFrac + 0.5,
+      `posAtMeld=${resumedFrame ? Math.abs(resumedFrame.pos).toFixed(2) : 'n/a'} peak*frac=${(peak * resumeFrac).toFixed(2)}`);
+    // The meld must NOT fire while the spring is still above the threshold —
+    // the first resumed frame must be at/after the first below-threshold frame.
+    const firstBelowIdx = trace.findIndex((f) => Math.abs(f.pos) <= peak * resumeFrac);
+    check(`resumeFrac ${resumeFrac}: no early resume (meld at/after first below-threshold frame)`,
+      resumedFrame && trace.indexOf(resumedFrame) >= firstBelowIdx,
+      `resumed@${trace.indexOf(resumedFrame)} firstBelow@${firstBelowIdx}`);
+    stopBop(card);
+  }
+}
+
+// ---- 13: No-snap resume — startIdleHeadPoses re-applies the frozen pose
+// with a transition so the first post-meld behavior eases instead of
+// teleporting (the "new animation triggered right after the bop" bug).
+console.log('\n[13] No-snap resume: head un-frozen with transition on meld');
+{
+  const card = makeCard('idle');
+  const a = card.animator;
+  // Simulate the frozen head: freezeHeadMotion() leaves a computed transform
+  // inline with transition: none. Stub getComputedStyle to return a pose.
+  const savedGCS = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = () => ({ transform: 'matrix(1, 0, 0, 1, 3, -2)' });
+  a.el.head.style.transform = 'matrix(1, 0, 0, 1, 3, -2)';
+  a.el.head.style.transition = 'none';
+
+  bopHead(card);
+  pumpBop(card);
+
+  // After the meld, startIdleHeadPoses must have restored a transition on the
+  // head (un-freezing it) — the head must NOT be left with transition: none.
+  check('head transition restored after meld (not left frozen)',
+    a.el.head.style.transition !== 'none',
+    `transition=${JSON.stringify(a.el.head.style.transition)}`);
+  check('idle-behavior re-set after meld', a._timers.has('idle-behavior'));
+  globalThis.getComputedStyle = savedGCS;
   stopBop(card);
 }
 

@@ -60,7 +60,11 @@ export function buildTemplate(config) {
       #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
       #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
 
-      #eye-halo, #eye-center { transition: fill 0.8s ease-in-out; }
+      #eye-halo { transition: fill 0.8s ease-in-out; }
+      /* Eye pulse: the dance engine scales #eye-center every beat; a short
+         transform transition turns that write into an organic pulse instead
+         of a snap. Kept short so the pulse still lands on the beat. */
+      #eye-center { transition: fill 0.8s ease-in-out, transform 0.18s ease-out; }
       .eye-layer { transition: opacity 0.8s ease-in-out; }
       @keyframes eye-breathe { 0%,100%{opacity:.02} 48%{opacity:.2} }
       #eye-halo.breathing { animation: eye-breathe 8s ease-in-out infinite; }

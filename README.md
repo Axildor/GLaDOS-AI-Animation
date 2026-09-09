@@ -83,7 +83,7 @@ tap_action:
 | `tap_speed` | number | Optional | Bop animation speed, `0.1` (slow) – `2.0` (fast). Default is `0.5`. |
 | `tap_bounces` | number | Optional | Rebound oscillations before settling, `1`–`20`. Default is `5`. |
 | `tap_intensity` | number | Optional | How far the head pulls back, `0.5`–`2`. Default is `1.0`. |
-| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of the actual peak bounce) where the paused background resumes, `0.05`–`0.8`. Default is `0.3`. Tapping freezes all in-flight head motion (idle poses, dance keyframes, and the dance groove bob) so the bop owns the head exclusively — the beat clock keeps running, so the dance stays synced — and the background melds back in at this point while the last small bounces are still finishing. Re-tapping mid-bop always amplifies the bounce (energy-add kick, never dampens, no matter where in the swing you tap) and re-arms the meld point. |
+| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of the actual peak bounce) where the paused background resumes, `0.05`–`0.8`. Default is `0.3`. Tapping freezes all in-flight head motion (idle poses, dance keyframes, and the dance groove bob) so the bop owns the head exclusively — the beat clock keeps running, so the dance stays synced — and the background melds back in at this point while the last small bounces are still finishing. The peak is measured once at the top of the first bounce, so the resume point is exact and the slider is honest. Re-tapping mid-bop always amplifies the bounce (energy-add kick, never dampens, no matter where in the swing you tap) and re-arms the meld point from the new bounce's peak. |
 
 ## 🧑‍💻 Development
 

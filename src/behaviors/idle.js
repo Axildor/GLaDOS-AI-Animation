@@ -173,11 +173,30 @@ export function stopIdleHeadPoses(card) {
  * Restart just the head-pose behavior scheduler (pupil darting already
  * running). Used by the bop tail-resume: idle poses resume while the bop
  * spring is still finishing its decay on the dedicated #head-bop layer.
+ *
+ * The head was FROZEN mid-pose by freezeHeadMotion() (transition: none) when
+ * the bop started. Before re-arming the scheduler, the frozen pose is
+ * re-applied WITH a transition so the first post-meld behavior eases from
+ * where the head actually is instead of teleporting to its new target —
+ * a teleport here reads as "a new animation fired" right after the bop.
  */
 export function startIdleHeadPoses(card) {
   if (card._state !== 'idle') return;
-  card.animator.clearTimeout('idle-behavior');
-  card.animator.setTimeout('idle-behavior', () => runNextIdleBehavior(card), 300 + Math.random() * 800);
+  // Un-freeze the head: re-apply the live computed transform with a short
+  // transition so the next setHead() call eases from the frozen pose rather
+  // than snapping (the frozen inline transform has transition: none).
+  const a = card.animator;
+  try {
+    const t = getComputedStyle(a.el.head).transform;
+    if (t && t !== 'none') {
+      a.el.head.style.transition = 'transform 0.6s cubic-bezier(0.34,1.06,0.64,1)';
+      a.el.head.style.transform = t;
+    } else {
+      a.el.head.style.transition = '';
+    }
+  } catch (err) { /* stub environments */ }
+  a.clearTimeout('idle-behavior');
+  a.setTimeout('idle-behavior', () => runNextIdleBehavior(card), 300 + Math.random() * 800);
 }
 
 export function stopIdleCycle(card) {
