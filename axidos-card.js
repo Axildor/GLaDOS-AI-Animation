@@ -930,6 +930,401 @@ function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
   return spring;
 }
 
+// src/behaviors/choreography.js
+function hash32(n) {
+  n = n ^ 61 ^ n >>> 16;
+  n = n + (n << 3) | 0;
+  n ^= n >>> 4;
+  n = Math.imul(n, 668265261);
+  n ^= n >>> 15;
+  return n >>> 0;
+}
+function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function() {
+    s = s + 1831565813 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var ENERGY_WINDOWS = [0.35, 0.65, 1, 0.45];
+function getEnergy(dancePhase) {
+  const macro = (dancePhase % 64 + 64) % 64;
+  const win = Math.floor(macro / 16);
+  const b = macro % 16;
+  const cur = ENERGY_WINDOWS[win];
+  if (b < 12) return cur;
+  const next = ENERGY_WINDOWS[(win + 1) % 4];
+  return cur + (next - cur) * ((b - 12) / 3);
+}
+var dip = (isDown, depth) => isDown ? depth : -depth * 0.45;
+var side2 = (b, lead) => (Math.floor(b / 2) % 2 === 0 ? 1 : -1) * lead;
+var hit = (r, tx, ty, s, lid, durBeats, pump, dart) => ({
+  r,
+  tx,
+  ty,
+  s,
+  lid,
+  dart: dart || null,
+  flow: false,
+  durBeats,
+  pump
+});
+var flow = (r, tx, ty, s, lid, durBeats, pump) => ({
+  r,
+  tx,
+  ty,
+  s,
+  lid,
+  dart: null,
+  flow: true,
+  durBeats,
+  pump
+});
+var TIERS = [
+  // ---- Tier 0: chill (< 90 BPM) — all FLOW, slow suspended sways ----
+  {
+    phrases: [
+      {
+        name: "pendulum-sway",
+        energy: 0.3,
+        entry: [3, 2, 4, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 8;
+          return flow(r, r * 0.5, 4 + dip(c.isDown, 3), 1, 0.35, 1.9, c.isDown ? 2 : 0);
+        }
+      },
+      {
+        name: "crane-sweep",
+        energy: 0.45,
+        entry: [5, 2, 3, 1],
+        pose(b, c) {
+          const r = c.lead * 10 * Math.sin(b * Math.PI / 8);
+          return flow(r, r * 0.4, 3 + dip(c.isDown, 2), 1, 0.3, 1.9, c.isDown ? 2 : 0);
+        }
+      },
+      {
+        name: "slow-loom",
+        energy: 0.35,
+        entry: [0, 0, 6, 1.02],
+        pose(b, c) {
+          const r = Math.sin(b * Math.PI / 4) * 3;
+          return flow(r, r * 0.5, 6 + dip(c.isDown, 4), c.isDown ? 1.04 : 1, 0.45, 1.9, c.isDown ? 2 : 0);
+        }
+      },
+      {
+        name: "bob-drift",
+        energy: 0.5,
+        entry: [0, 0, 6, 1],
+        pose(b, c) {
+          const r = Math.sin(b * Math.PI / 2) * 4;
+          return flow(r, r * 0.6, 6 + dip(c.isDown, 6), 1, 0.3, 1.9, c.isDown ? 2 : 0);
+        }
+      },
+      {
+        name: "settle-rest",
+        energy: 0.15,
+        entry: [0, 0, 2, 1],
+        pose(b, c) {
+          const r = Math.sin(b * Math.PI / 4) * 2;
+          return flow(r, r * 0.5, 2 + dip(c.isDown, 1.5), 1, 0.55, 1.9, c.isDown ? 1 : 0);
+        }
+      }
+    ],
+    edges: [
+      [[1, 0.35], [2, 0.3], [3, 0.25], [4, 0.1]],
+      [[0, 0.3], [2, 0.25], [3, 0.2], [4, 0.25]],
+      [[0, 0.3], [1, 0.25], [3, 0.2], [4, 0.25]],
+      [[0, 0.3], [1, 0.25], [2, 0.2], [4, 0.25]],
+      [[0, 0.4], [1, 0.3], [2, 0.3]]
+    ]
+  },
+  // ---- Tier 1: groovy (90-125 BPM) — confident hits on the beat ----
+  {
+    phrases: [
+      {
+        name: "metronome-rock",
+        energy: 0.5,
+        entry: [4, 2, 4, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 8;
+          return hit(
+            r,
+            r * 0.5,
+            4 + dip(c.isDown, 5),
+            c.isDown ? 1.02 : 0.99,
+            0.2,
+            0.8,
+            c.isDown ? 3 : 0,
+            c.quad ? [(c.rnd() - 0.5) * 4, (c.rnd() - 0.5) * 3] : null
+          );
+        }
+      },
+      {
+        name: "dip-nod",
+        energy: 0.6,
+        entry: [0, 0, 6, 1.02],
+        pose(b, c) {
+          return hit(0, 0, 6 + dip(c.isDown, 7), c.isDown ? 1.03 : 0.98, 0.25, 0.8, c.isDown ? 4 : 0);
+        }
+      },
+      {
+        name: "swivel-groove",
+        energy: 0.65,
+        entry: [5, 3, 5, 1],
+        pose(b, c) {
+          const r = c.lead * 8 * Math.sin(b * Math.PI / 4);
+          return hit(r, r * 0.5, 5 + dip(c.isDown, 3), 1, 0.2, 0.8, c.isDown ? 3 : 0);
+        }
+      },
+      {
+        name: "bounce-build",
+        energy: 0.8,
+        entry: [0, 0, 5, 1.02],
+        pose(b, c) {
+          const k = 0.6 + b / 16 * 0.8;
+          const r = side2(b, c.lead) * 6 * k;
+          return hit(
+            r,
+            r * 0.5,
+            5 + dip(c.isDown, 7 * k),
+            c.isDown ? 1 + 0.04 * k : 1 - 0.02 * k,
+            0.15,
+            0.8,
+            c.isDown ? 3 + 2 * k : 0
+          );
+        }
+      },
+      {
+        name: "groove-release",
+        energy: 0.3,
+        entry: [3, 2, 3, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 5;
+          return flow(r, r * 0.5, 3 + dip(c.isDown, 2), 1, 0.4, 1.5, c.isDown ? 2 : 0);
+        }
+      }
+    ],
+    edges: [
+      [[1, 0.3], [2, 0.3], [3, 0.25], [4, 0.15]],
+      [[0, 0.3], [2, 0.3], [3, 0.2], [4, 0.2]],
+      [[0, 0.25], [1, 0.25], [3, 0.3], [4, 0.2]],
+      [[0, 0.3], [2, 0.3], [4, 0.4]],
+      [[0, 0.35], [1, 0.35], [2, 0.3]]
+    ]
+  },
+  // ---- Tier 2: club (125-160 BPM) — sharp snaps, looms, the drop ----
+  {
+    phrases: [
+      {
+        name: "dip-loom",
+        energy: 0.7,
+        entry: [4, 2, 5, 1.02],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 5;
+          return hit(
+            r,
+            r * 0.5,
+            5 + dip(c.isDown, 6),
+            c.isDown ? 1.04 : 0.97,
+            c.isDown ? 0.1 : 0,
+            0.6,
+            c.isDown ? 4 : 0
+          );
+        }
+      },
+      {
+        name: "snap-swivel",
+        energy: 0.85,
+        entry: [6, 3, 4, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * (c.isDown ? 12 : 3.6);
+          return hit(r, r * 0.4, 4 + dip(c.isDown, 4), 1, 0.1, c.isDown ? 0.5 : 0.6, c.isDown ? 4 : 0);
+        }
+      },
+      {
+        name: "pendulum-pump",
+        energy: 0.75,
+        entry: [5, 3, 4, 1],
+        pose(b, c) {
+          const r = (b % 2 === 0 ? 1 : -1) * c.lead * 10;
+          return hit(r, r * 0.5, 4 + dip(c.isDown, 4), 1.01, 0.15, 0.6, c.isDown ? 4 : 0);
+        }
+      },
+      {
+        name: "peak-stomp",
+        energy: 1,
+        entry: [8, 4, 6, 1.03],
+        halo: 0.8,
+        pose(b, c) {
+          const r = side2(b, c.lead) * 14;
+          return hit(r, r * 0.5, 6 + dip(c.isDown, 8), c.isDown ? 1.06 : 0.97, 0, 0.45, c.isDown ? 5 : 0);
+        }
+      },
+      {
+        name: "club-release",
+        energy: 0.4,
+        entry: [3, 2, 3, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 6;
+          return flow(r, r * 0.5, 3 + dip(c.isDown, 3), 1, 0.3, 1.6, c.isDown ? 2 : 0);
+        }
+      }
+    ],
+    edges: [
+      [[1, 0.3], [2, 0.3], [3, 0.2], [4, 0.2]],
+      [[0, 0.15], [2, 0.25], [3, 0.35], [4, 0.25]],
+      [[0, 0.2], [1, 0.3], [3, 0.3], [4, 0.2]],
+      [[0, 0.3], [2, 0.2], [4, 0.5]],
+      [[0, 0.4], [1, 0.3], [2, 0.3]]
+    ]
+  },
+  // ---- Tier 3: hardcore (160+ BPM) — mechanical assault, seeded chaos ----
+  {
+    phrases: [
+      {
+        name: "violent-pendulum",
+        energy: 0.75,
+        entry: [8, 4, 5, 1],
+        pose(b, c) {
+          const r = (b % 2 === 0 ? 1 : -1) * c.lead * 16;
+          return hit(r, r * 0.5, 5 + dip(c.isDown, 6), c.isDown ? 1.04 : 0.97, 0.1, 0.8, c.isDown ? 5 : 0);
+        }
+      },
+      {
+        name: "servo-stutter",
+        energy: 1,
+        entry: [0, 0, 4, 1.03],
+        pose(b, c) {
+          const r = (Math.floor(c.rnd() * 5) - 2) * 7;
+          return hit(
+            r,
+            r * 0.4,
+            4 + dip(c.isDown, 5),
+            c.isDown ? 1.05 : 0.96,
+            c.quad ? 0.5 : 0.1,
+            0.5,
+            c.isDown ? 5 : 0,
+            c.isDown ? [(c.rnd() - 0.5) * 9, (c.rnd() - 0.5) * 7] : null
+          );
+        }
+      },
+      {
+        name: "loom-assault",
+        energy: 0.95,
+        entry: [0, 0, 6, 1.05],
+        halo: 0.8,
+        pose(b, c) {
+          return hit(
+            0,
+            0,
+            6 + dip(c.isDown, 7),
+            c.isDown ? 1.09 : 0.95,
+            0,
+            c.isDown ? 0.4 : 0.7,
+            c.isDown ? 5 : 0
+          );
+        }
+      },
+      {
+        name: "stomp-cycle",
+        energy: 1,
+        entry: [6, 3, 8, 1.04],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 10;
+          return hit(r, r * 0.5, 8 + dip(c.isDown, 9), c.isDown ? 1.07 : 0.96, 0.05, 0.8, c.isDown ? 5 : 0);
+        }
+      },
+      {
+        name: "hardcore-release",
+        energy: 0.5,
+        entry: [4, 2, 3, 1],
+        pose(b, c) {
+          const r = side2(b, c.lead) * 6 * (1 - b / 20);
+          return flow(r, r * 0.5, 3 + dip(c.isDown, 3), 1, 0.35, 1.4, c.isDown ? 2 : 0);
+        }
+      }
+    ],
+    edges: [
+      [[1, 0.3], [2, 0.2], [3, 0.3], [4, 0.2]],
+      [[0, 0.25], [2, 0.3], [3, 0.25], [4, 0.2]],
+      [[0, 0.2], [1, 0.25], [3, 0.35], [4, 0.2]],
+      [[0, 0.35], [1, 0.25], [4, 0.4]],
+      [[0, 0.35], [2, 0.3], [3, 0.35]]
+    ]
+  }
+];
+var PEAK_GATE = 0.8;
+var PEAK_MARGIN = 0.3;
+function pickNextPhrase(tierIdx, currentId, nextWindowEnergy, phraseCount) {
+  const tier = TIERS[tierIdx];
+  const edges = tier.edges[currentId] || [];
+  const eligible = edges.filter(([to]) => {
+    const p = tier.phrases[to];
+    return p.energy <= PEAK_GATE || nextWindowEnergy >= p.energy - PEAK_MARGIN;
+  });
+  const pool = eligible.length > 0 ? eligible : edges;
+  const rnd = mulberry32(hash32(
+    Math.imul(phraseCount + 1, 2654435761) ^ Math.imul(tierIdx + 1, 2246822519) ^ Math.imul(currentId + 1, 3266489917)
+  ));
+  let roll = rnd() * pool.reduce((s, e) => s + e[1], 0);
+  for (const [to, w] of pool) {
+    roll -= w;
+    if (roll <= 0) return to;
+  }
+  return pool[pool.length - 1][0];
+}
+function phraseVariant(tierIdx, phraseId, phraseCount) {
+  const rnd = mulberry32(hash32(
+    Math.imul(phraseCount + 1, 2654435761) ^ Math.imul(phraseId + 1, 668265263) ^ Math.imul(tierIdx + 1, 374761393)
+  ));
+  return { lead: rnd() < 0.5 ? 1 : -1, jitter: 0.9 + rnd() * 0.2 };
+}
+function getPhraseEntry(tierIdx, phraseId) {
+  return TIERS[tierIdx].phrases[phraseId].entry;
+}
+function getBeatPose(tierIdx, phraseId, b, variant, energy, nextEntry) {
+  const phrase = TIERS[tierIdx].phrases[phraseId];
+  const isDown = b % 2 === 0;
+  const rnd = mulberry32(hash32(
+    Math.imul(phraseId + 1, 7919) ^ Math.imul(b + 1, 104729) ^ Math.imul(tierIdx + 1, 7)
+  ));
+  const raw = phrase.pose(b, { isDown, quad: b % 4 === 0, m4: b % 4, m8: b % 8, lead: variant.lead, rnd });
+  const establish = b < 4 ? 0.7 + 0.1 * b : 1;
+  const k = establish * (0.85 + 0.2 * energy) * variant.jitter;
+  let r = raw.r * k;
+  let tx = raw.tx * k;
+  let ty = raw.ty * k;
+  let s = 1 + (raw.s - 1) * k;
+  const pump = raw.pump * k;
+  let lid = raw.lid;
+  let outFlow = raw.flow;
+  let durBeats = raw.durBeats;
+  if (nextEntry && b >= 13) {
+    const w = (b - 12) / 3;
+    r += (nextEntry[0] - r) * w;
+    tx += (nextEntry[1] - tx) * w;
+    ty += (nextEntry[2] - ty) * w;
+    s += (nextEntry[3] - s) * w;
+    outFlow = true;
+    durBeats = 1.6;
+    lid = Math.max(lid, 0.2);
+  }
+  return {
+    r,
+    tx,
+    ty,
+    s,
+    lid,
+    pump,
+    flow: outFlow,
+    durBeats,
+    dart: raw.dart,
+    halo: phrase.halo
+  };
+}
+
 // src/behaviors/dance.js
 function readHeadPose(a) {
   try {
@@ -949,12 +1344,15 @@ function startDanceCycle(card, bpm) {
   const a = card.animator;
   stopDanceCycle(card);
   let dancePhase = 0;
-  let currentRoutine = Math.floor(Math.random() * 8);
   const currentBpm = Math.max(60, Math.min(200, bpm));
   const beatMs = 60 / currentBpm * 1e3;
   const beatSec = beatMs / 1e3;
   let expectedNextTick = performance.now() + beatMs;
   const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
+  let phraseId = 0;
+  let phraseCount = 0;
+  let variant = phraseVariant(tierIdx, phraseId, phraseCount);
+  let nextPhraseId = null;
   const grooveOmega = Math.max(0.08, Math.min(0.3, 2 * Math.PI * 16.666 / (beatMs * 2)));
   const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.55, settleThreshold: 0.05 });
   const kickDown = (4 + tierIdx * 2) * grooveOmega;
@@ -975,11 +1373,9 @@ function startDanceCycle(card, bpm) {
   };
   a.requestRaf("dance-groove-raf", grooveLoop);
   let lastPose = readHeadPose(a);
-  const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];
   const overshoot = [1.08, 1.12, 1.18, 1.25][tierIdx];
   const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
   const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];
-  const bellowsPump = [2, 3, 4, 5][tierIdx];
   let wasHeld = false;
   let prevMoveFlow = false;
   const step = () => {
@@ -1005,28 +1401,27 @@ function startDanceCycle(card, bpm) {
       wasHeld = false;
       prevMoveFlow = false;
     }
-    let routineChanged = false;
-    if (dancePhase > 0 && dancePhase % 16 === 0) {
-      let nextRoutine;
-      do {
-        nextRoutine = Math.floor(Math.random() * 8);
-      } while (nextRoutine === currentRoutine);
-      currentRoutine = nextRoutine;
-      routineChanged = true;
+    const b = dancePhase % 16;
+    if (b === 0 && dancePhase > 0 && nextPhraseId !== null) {
+      phraseId = nextPhraseId;
+      phraseCount++;
+      variant = phraseVariant(tierIdx, phraseId, phraseCount);
+      nextPhraseId = null;
     }
-    const choreoBlock = currentRoutine;
-    const isDownBeat = dancePhase % 2 === 0;
-    const isQuadBeat = dancePhase % 4 === 0;
-    const phaseMod4 = dancePhase % 4;
-    const phaseMod8 = dancePhase % 8;
-    const dirX = isDownBeat ? 1 : -1;
+    const isDownBeat = b % 2 === 0;
+    const energy = getEnergy(dancePhase);
     if (currentBpm >= 90 || isDownBeat) {
       groove.injectVelocity(isDownBeat ? kickDown : kickOff);
     }
+    if (b === 12 && nextPhraseId === null) {
+      nextPhraseId = pickNextPhrase(tierIdx, phraseId, getEnergy(dancePhase + 16), phraseCount);
+    }
+    const nextEntry = nextPhraseId !== null && b >= 13 ? getPhraseEntry(tierIdx, nextPhraseId) : null;
+    const move = getBeatPose(tierIdx, phraseId, b, variant, energy, nextEntry);
     a.setLEDs("#1DB954", "1");
-    a.el.eyeHalo.style.opacity = choreoBlock === 7 ? "0.8" : "0.5";
+    a.el.eyeHalo.style.opacity = move.halo ? String(move.halo) : "0.5";
     a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
-    a.setBellows(bellowsPump, 0.12);
+    a.setBellows(move.pump, 0.12);
     a.setTimeout("dance-led", () => {
       if (card._state === "dancing") {
         a.setLEDs("#1DB954", "0.15");
@@ -1046,201 +1441,8 @@ function startDanceCycle(card, bpm) {
         }, beatMs * 0.15);
       }, beatMs * 0.5);
     }
-    let r = 0, tx = 0, ty = 0, s = 1, lid = 0, ease = "ease-in-out";
-    let moveDur = beatSec;
-    let bodyDur = beatSec * 3;
-    let flow = false;
-    if (currentBpm < 90) {
-      moveDur = beatSec * 1.9;
-      bodyDur = beatSec * 4;
-      ease = "ease-in-out";
-      lid = 0.35;
-      flow = true;
-      if (choreoBlock === 0) {
-        r = isQuadBeat ? 8 : -8;
-        tx = isQuadBeat ? 5 : -5;
-        ty = 2;
-      } else if (choreoBlock === 1) {
-        r = 0;
-        tx = 0;
-        ty = isQuadBeat ? 15 : -5;
-      } else if (choreoBlock === 2) {
-        r = Math.sin(dancePhase * Math.PI / 2) * 6;
-        tx = Math.sin(dancePhase * Math.PI / 2) * 5;
-        ty = Math.cos(dancePhase * Math.PI / 4) * 8 + 4;
-      } else if (choreoBlock === 3) {
-        r = phaseMod8 < 4 ? 10 : -10;
-        tx = phaseMod8 < 4 ? 4 : -4;
-        ty = 5;
-      } else if (choreoBlock === 4) {
-        r = Math.sin(dancePhase * Math.PI / 4) * 12;
-        tx = 0;
-        ty = 0;
-      } else if (choreoBlock === 5) {
-        r = isQuadBeat ? 4 : -4;
-        tx = 0;
-        ty = isQuadBeat ? 12 : 2;
-        s = isQuadBeat ? 1.03 : 1;
-      } else if (choreoBlock === 6) {
-        r = phaseMod8 === 0 ? 12 : phaseMod8 === 4 ? -6 : 0;
-        tx = r * 0.5;
-        ty = 8;
-      } else {
-        r = 0;
-        tx = 0;
-        ty = 2;
-        s = 1.05;
-        lid = 0.5 + Math.sin(dancePhase * Math.PI / 2) * 0.3;
-      }
-      if (!isDownBeat) {
-        r *= 0.5;
-        tx *= 0.5;
-      }
-    } else if (currentBpm < 125) {
-      moveDur = beatSec * 0.8;
-      ease = "cubic-bezier(0.34, 1.06, 0.64, 1)";
-      lid = 0.2;
-      if (choreoBlock === 0) {
-        r = isDownBeat ? 7 : -7;
-        ty = isDownBeat ? 8 : -2;
-        s = isDownBeat ? 1.02 : 1;
-      } else if (choreoBlock === 1) {
-        const side = phaseMod4 < 2 ? 1 : -1;
-        r = side * 8;
-        tx = side * 4;
-        ty = isDownBeat ? 10 : 2;
-      } else if (choreoBlock === 2) {
-        r = phaseMod4 === 0 ? 10 : phaseMod4 === 2 ? -10 : 0;
-        ty = phaseMod4 === 1 || phaseMod4 === 3 ? 12 : 0;
-        ease = "ease-in-out";
-      } else if (choreoBlock === 3) {
-        r = [10, 5, -10, -5][phaseMod4];
-        ty = [0, 8, 0, 8][phaseMod4];
-      } else if (choreoBlock === 4) {
-        r = 0;
-        tx = isDownBeat ? 8 : -8;
-        ty = 4;
-      } else if (choreoBlock === 5) {
-        r = isDownBeat ? 10 : -10;
-        tx = isDownBeat ? 5 : -5;
-        ty = isDownBeat ? 10 : -5;
-      } else if (choreoBlock === 6) {
-        r = dirX * 6;
-        ty = !isDownBeat ? 14 : 0;
-        s = !isDownBeat ? 1.04 : 1;
-      } else {
-        const side = dancePhase % 3 === 0 ? -1 : 1;
-        r = side * 8;
-        ty = isDownBeat ? 8 : 0;
-      }
-    } else if (currentBpm < 160) {
-      moveDur = beatSec * 0.6;
-      ease = "cubic-bezier(0.25, 0.8, 0.25, 1)";
-      lid = isDownBeat ? 0.1 : 0;
-      if (choreoBlock === 0) {
-        r = isDownBeat ? 12 : -12;
-        tx = isDownBeat ? 6 : -6;
-        ty = isDownBeat ? 10 : -8;
-        s = 1.03;
-      } else if (choreoBlock === 1) {
-        r = 0;
-        tx = [8, 0, -8, 0][phaseMod4];
-        ty = isDownBeat ? 5 : -5;
-        if (phaseMod4 === 3) lid = 0.6;
-      } else if (choreoBlock === 2) {
-        r = isDownBeat ? 5 : -5;
-        ty = isDownBeat ? 5 : -2;
-        s = 1 + phaseMod4 * 0.03;
-        lid = 0.4 - phaseMod4 * 0.1;
-      } else if (choreoBlock === 3) {
-        r = isDownBeat ? 15 : -15;
-        tx = isDownBeat ? 5 : -5;
-        ty = 8;
-      } else if (choreoBlock === 4) {
-        r = [10, 10, -10, -10][phaseMod4];
-        tx = [5, 5, -5, -5][phaseMod4];
-        ty = [8, -2, 8, -2][phaseMod4];
-      } else if (choreoBlock === 5) {
-        r = dirX * 10;
-        ty = isDownBeat ? 12 : 4;
-        s = 1.02;
-        moveDur = beatSec * 0.4;
-        ease = "linear";
-      } else if (choreoBlock === 6) {
-        r = phaseMod4 === 1 || phaseMod4 === 3 ? 0 : phaseMod4 === 0 ? 12 : -12;
-        ty = phaseMod4 === 1 || phaseMod4 === 3 ? 14 : -2;
-      } else {
-        r = isDownBeat ? 12 : 12;
-        tx = isDownBeat ? 8 : 8;
-        ty = isDownBeat ? 8 : -4;
-        if (isDownBeat) moveDur = beatSec * 0.35;
-        else moveDur = beatSec * 0.8;
-      }
-      if (isQuadBeat && choreoBlock !== 2) a.setPupil((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 4);
-    } else {
-      moveDur = beatSec * 0.8;
-      ease = "linear";
-      lid = isQuadBeat ? 0.4 : 0;
-      if (choreoBlock === 0) {
-        r = 0;
-        tx = 0;
-        ty = isDownBeat ? 20 : -10;
-        s = isDownBeat ? 1.08 : 0.95;
-        ease = "ease-out";
-      } else if (choreoBlock === 1) {
-        r = (Math.random() - 0.5) * 30;
-        tx = (Math.random() - 0.5) * 15;
-        ty = (Math.random() - 0.5) * 15;
-        moveDur = beatSec * 0.5;
-      } else if (choreoBlock === 2) {
-        r = isDownBeat ? 18 : -18;
-        tx = isDownBeat ? 10 : -10;
-        ty = 12;
-      } else if (choreoBlock === 3) {
-        r = isDownBeat ? 10 : -10;
-        tx = (Math.random() - 0.5) * 20;
-        ty = 15;
-        s = 1.1;
-        a.el.eyeHalo.style.opacity = "0.8";
-      } else if (choreoBlock === 4) {
-        r = isDownBeat ? 25 : -25;
-        tx = isDownBeat ? 15 : -15;
-        ty = isDownBeat ? 15 : -15;
-      } else if (choreoBlock === 5) {
-        r = 0;
-        tx = 0;
-        ty = isDownBeat ? 12 : 2;
-        moveDur = beatSec * 0.4;
-      } else if (choreoBlock === 6) {
-        r = Math.sin(dancePhase * Math.PI) * 20;
-        tx = Math.sin(dancePhase * Math.PI) * 12;
-        ty = Math.cos(dancePhase * Math.PI / 2) * 15 + 5;
-      } else {
-        if (phaseMod4 === 0) {
-          r = 15;
-          ty = 10;
-          s = 1.1;
-          moveDur = beatSec * 0.35;
-        } else {
-          r = 15;
-          ty = 10;
-          s = 1.1;
-          moveDur = beatSec * 1.5;
-        }
-        a.el.eyeCenter.setAttribute("fill", dancePhase % 2 === 0 ? "#ff0000" : "#ffffff");
-      }
-      if (isDownBeat) a.setPupil((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 7);
-    }
-    if (routineChanged) {
-      r *= 0.4;
-      tx *= 0.4;
-      ty *= 0.4;
-      s = 1 + (s - 1) * 0.4;
-      flow = true;
-      moveDur = beatSec * 0.95;
-      ease = "ease-in-out";
-    }
-    if (flow) {
+    let moveDur = move.durBeats * beatSec;
+    if (move.flow) {
       moveDur = Math.min(moveDur, beatSec * 1.9);
     } else {
       moveDur = Math.min(moveDur, beatSec * 0.95);
@@ -1248,37 +1450,44 @@ function startDanceCycle(card, bpm) {
     if (prevMoveFlow) {
       lastPose = readHeadPose(a);
     }
-    const target = [r, tx, ty, s];
+    const target = [move.r, move.tx, move.ty, move.s];
     let frames;
-    if (flow) {
+    if (move.flow) {
       frames = [
         { pose: lastPose, offset: 0, easing: "ease-in-out" },
         { pose: target }
       ];
     } else {
-      const hit = [r * overshoot, tx * overshoot, ty * overshoot, 1 + (s - 1) * overshoot];
+      const hitPose = [move.r * overshoot, move.tx * overshoot, move.ty * overshoot, 1 + (move.s - 1) * overshoot];
       if (isDownBeat) {
         const wScale = [0.5, 0.3, 0.2, 0.15][tierIdx];
-        const anti = [-r * windup * wScale, -tx * windup * wScale, -ty * windup * wScale, 1 - (s - 1) * windup * wScale * 0.5];
+        const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];
+        const anti = [
+          -move.r * windup * wScale,
+          -move.tx * windup * wScale,
+          -move.ty * windup * wScale,
+          1 - (move.s - 1) * windup * wScale * 0.5
+        ];
         frames = [
           { pose: lastPose, offset: 0, easing: "ease-in" },
           { pose: anti, offset: windupFrac, easing: "ease-out" },
-          { pose: hit, offset: windupFrac + (1 - windupFrac) * 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+          { pose: hitPose, offset: windupFrac + (1 - windupFrac) * 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
           { pose: target }
         ];
       } else {
         frames = [
           { pose: lastPose, offset: 0, easing: "ease-in-out" },
-          { pose: hit, offset: 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
+          { pose: hitPose, offset: 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
           { pose: target }
         ];
       }
     }
     a.setHeadKeyframes(frames, moveDur, lastPose);
     lastPose = target;
-    prevMoveFlow = flow;
-    a.setBodySwivel(r * -0.5, 1, bodyDur);
-    lid = Math.max(lid, currentBpm < 125 ? 0.15 : 0.08);
+    prevMoveFlow = move.flow;
+    if (move.dart) a.setPupil(move.dart[0], move.dart[1]);
+    a.setBodySwivel(move.r * -0.5, 1, beatSec * 3);
+    const lid = Math.max(move.lid, currentBpm < 125 ? 0.15 : 0.08);
     a.setBaseLid(lid, beatSec * 0.5);
     executeTick();
   };

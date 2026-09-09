@@ -20,18 +20,20 @@ She tracks your voice assistant's state in real-time, features a randomized idle
 
 When your configured media player starts playing, AXiDOS enters a dedicated **Spotify Green** dance mode. 
 
-Instead of a basic looped animation, she features a **Macro-Choreography Math Engine** that actively reads the tempo of your music and chains together **32 unique, tempo-locked dance routines**. Every 16 beats, she randomly switches her style so the animation stays fresh throughout a full song.
+Instead of a basic looped animation, she features a **Phrase-Graph Choreography Engine** that actively reads the tempo of your music and dances in **16-beat phrases** — named moves like *pendulum sway*, *dip & loom*, and *servo stutter* that mimic how a suspended robotic head would actually groove. A transition graph chains phrases into each other (no jarring style teleports), and a 64-beat **energy arc** gives the dance verse/chorus dynamics: she grooves, builds, peaks, and releases like she's actually performing the song.
 
 Her movement is built from three composable layers, the same way a real puppeteer works:
 * **Groove Spring** — a physics-driven bob that gets a "kick" on every beat (harder on downbeats), so she never looks like she's marching to a metronome.
 * **Keyframed Moves** — every pose change plays a cartoon-style *anticipation → hit → settle* sequence: she winds up opposite the move, snaps through with overshoot, then lands on the pose.
-* **Syncopation & Breathing** — at 90+ BPM she adds half-beat "and" accents (counter-kicks, eye darts, LED flickers), and her bellows pump on the downbeats like she's breathing with the music.
+* **Physical Laws** — every move obeys her anatomy: she *dips into* the downbeat (gravity), her head swings in an arc rather than sliding sideways (pendulum), her torso swivel lags behind the head like a slow groove, and direction reversals land exactly on the beat (mechanical precision).
+* **Choreographed Handoffs** — the last 3 beats of every phrase glide toward the next phrase's entry pose, so style switches read as deliberate transitions, not pose teleports.
+* **Syncopation & Breathing** — at 90+ BPM she adds half-beat "and" accents (counter-kicks, eye darts, LED flickers), and her bellows compresses on the downbeat dip and releases on the rise — she breathes *with* the beat.
 
 Her personality shifts depending on the speed of the music:
-* **Chill & Soulful (< 90 BPM):** Fluid, heavily relaxed movements. Half-note vertical nods, wide figure-8 sweeps, and heavy eyelids.
-* **Groovy & Pop (90 - 124 BPM):** Confident and bouncy. Syncopated U-shaped sweeps, double-bounces, and standard left/right bobs.
-* **Upbeat & Club (125 - 159 BPM):** Sharp, high-energy snaps. Rapid eye darts, diagonal snapping tilts, and 4-beat build-up zooms.
-* **Intense & Hardcore (160+ BPM):** Aggressive and chaotic. Deep vertical headbangs, erratic twitching, and mechanical system overrides.
+* **Chill & Soulful (< 90 BPM):** Fluid, heavily relaxed glides — *pendulum sway*, *crane sweep*, *slow loom* — with heavy eyelids.
+* **Groovy & Pop (90 - 124 BPM):** Confident and bouncy — *metronome rock*, *dip & nod*, *swivel groove*, and a *bounce build* that grows into the chorus.
+* **Upbeat & Club (125 - 159 BPM):** Sharp, high-energy snaps — *dip & loom*, *snap swivel*, *pendulum pump*, and a *peak stomp* for the drop.
+* **Intense & Hardcore (160+ BPM):** Aggressive mechanical assault — *violent pendulum*, *servo stutter* (quantized glitch-groove), *loom assault*, and *stomp cycle*.
 
 ### ⚠️ Prerequisite for Dancing
 For AXiDOS to sync her movements to the beat, **she needs to know the BPM of the currently playing song**. 
@@ -102,7 +104,8 @@ The card source lives in small, focused ES modules under `src/` and is bundled i
 | `src/animator.js` | Element refs, motion primitives, timer/RAF registry |
 | `src/states.js` | Per-state visual setup (idle/dancing/listening/processing/responding) |
 | `src/behaviors/idle.js` | Weighted idle behaviors, lid loop, pupil darting |
-| `src/behaviors/dance.js` | BPM-synced choreography engine |
+| `src/behaviors/choreography.js` | Phrase-graph choreography data + walker (pure, no DOM) |
+| `src/behaviors/dance.js` | BPM-synced dance execution engine (phrase driver) |
 | `src/behaviors/talk.js` | Responding-state talk animation |
 | `src/behaviors/bop.js` | Spring-physics tap bop |
 | `src/behaviors/spring.js` | Shared damped-oscillator spring physics |
