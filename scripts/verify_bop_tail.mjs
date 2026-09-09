@@ -5,7 +5,7 @@
  * RAF clock and asserts:
  *
  *  1. Layer isolation: the bop spring writes transforms to #head-bop ONLY —
- *     #glados-head is never touched (idle poses / dance keyframes own it).
+ *     #axidos-head is never touched (idle poses / dance keyframes own it).
  *  2. Idle tap pauses ONLY head-pose idle behaviors (idle-behavior /
  *     idle-blink / idle-glitch); the pupil timer ('idle-pupil') survives.
  *  3. ARMED tail meld: the resume threshold must NOT trip on the spring's
@@ -36,12 +36,12 @@ import { bopHead, stopBop } from '../src/behaviors/bop.js';
 import { createSpring } from '../src/behaviors/spring.js';
 import { startDanceCycle } from '../src/behaviors/dance.js';
 
-// glados-card.js extends HTMLElement, which Node doesn't define. Shim it
+// axidos-card.js extends HTMLElement, which Node doesn't define. Shim it
 // before the dynamic import below so the class declaration can extend it.
 if (typeof HTMLElement === 'undefined') {
   globalThis.HTMLElement = class HTMLElement {};
 }
-const { GladosCard } = await import('../src/glados-card.js');
+const { AxidosCard } = await import('../src/axidos-card.js');
 
 // ---- Controllable clock + RAF/timer stubs ----
 
@@ -177,7 +177,7 @@ console.log('\n[1] Idle tap: layer isolation + selective pause + ARMED tail meld
   const trace = pumpBop(card);
 
   check('bop settled within frame budget', trace.length > 10 && trace.length < 2000, `frames=${trace.length}`);
-  check('#glados-head transform NEVER written by bop', trace.every((f) => f.headTransform === ''));
+  check('#axidos-head transform NEVER written by bop', trace.every((f) => f.headTransform === ''));
   check('#head-bop received spring transforms', trace.some((f) => f.bopTransform.includes('translate3d')));
   check('layer reset on settle (resetBopLayer called)', a._calls.resetBopLayer >= 1);
   check('spring nulled on settle', card._bopSpring === null);
@@ -232,7 +232,7 @@ console.log('\n[3] Dancing tap: dance held during bop, released at meld/settle')
 
   const trace = pumpBop(card);
 
-  check('#glados-head transform NEVER written while dancing', trace.every((f) => f.headTransform === ''));
+  check('#axidos-head transform NEVER written while dancing', trace.every((f) => f.headTransform === ''));
   check('#head-bop bounced while dancing', trace.some((f) => f.bopTransform.includes('translate3d')));
   check('layer reset on settle while dancing', a._calls.resetBopLayer >= 1);
   check('dance hold released by meld or settle', card._danceHeld === false);
@@ -457,10 +457,10 @@ console.log('\n[7] Spring sanity (shared oscillator)');
 // ---- 8: Zoom slot sizing — rows AND columns grow with zoom ----
 console.log('\n[8] getGridOptions: rows AND columns scale with zoom');
 {
-  // GladosCard extends HTMLElement; instantiate via a minimal shim if needed.
+  // AxidosCard extends HTMLElement; instantiate via a minimal shim if needed.
   let card;
   try {
-    card = new GladosCard();
+    card = new AxidosCard();
   } catch (err) {
     // Stub environments without HTMLElement: exercise the math directly.
     card = null;

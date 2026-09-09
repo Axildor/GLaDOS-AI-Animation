@@ -164,8 +164,8 @@ function buildEditorForm() {
         return void 0;
       }
       const helpers = {
-        entity: "The assist_satellite entity GLaDOS reacts to (required).",
-        media_entity: "When this media player plays, GLaDOS dances to the BPM sensor.",
+        entity: "The assist_satellite entity AXiDOS reacts to (required).",
+        media_entity: "When this media player plays, AXiDOS dances to the BPM sensor.",
         bpm_entity: "Sensor providing the current song BPM (e.g. SongBPM-26). Defaults to 120.",
         respond_delay: "Seconds to wait before switching from Processing to Responding.",
         zoom: "Scale percentage of the SVG model inside the card. Above 100 the card grows to keep the model fully visible.",
@@ -175,7 +175,7 @@ function buildEditorForm() {
         tap_speed: "0.1 = slow, 0.5 = normal, 2.0 = fast.",
         tap_intensity: "How far the head pulls back.",
         tap_bounces: "Full oscillation cycles before settling.",
-        tap_bop_resume: "Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if GLaDOS was dancing. Low = resume late, high = resume early."
+        tap_bop_resume: "Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if AXiDOS was dancing. Low = resume late, high = resume early."
       };
       return helpers[schema.name];
     }
@@ -222,7 +222,7 @@ function buildTemplate(config) {
       #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
       /* isolation: isolate \u2014 the SVG forms its own stacking context so its
          compositor layers don't interleave with the rest of the dashboard. */
-      #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; isolation: isolate; --led-color: #ffb800; --led-opacity: 0.15; }
+      #axidos-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; isolation: isolate; --led-color: #ffb800; --led-opacity: 0.15; }
 
       /* ---- Compositor-layer promotion ----
          Every group animated via transform gets will-change: transform so the
@@ -230,16 +230,16 @@ function buildTemplate(config) {
          (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
          the GPU instead of triggering main-thread SVG repaints. Applied ONLY
          to groups that actually animate \u2014 each hint costs GPU memory. */
-      #glados-head, #head-groove, #head-bop, #torso-swivel, #bellows,
+      #axidos-head, #head-groove, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
-      #glados-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
+      #axidos-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
       /* Bop layer: dedicated transform group for the tap-bop spring so it
-         composes additively with idle poses (#glados-head) and the dance
+         composes additively with idle poses (#axidos-head) and the dance
          groove bob (#head-groove) instead of fighting over one transform.
-         Pivots at the neck like #glados-head. */
+         Pivots at the neck like #axidos-head. */
       #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
@@ -253,7 +253,7 @@ function buildTemplate(config) {
       @keyframes head-ambient-sway { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
 
       #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
-      #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
+      #axidos-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
 
       #eye-halo { transition: fill 0.8s ease-in-out; }
       /* Eye pulse: the dance engine scales #eye-center every beat; a short
@@ -267,8 +267,8 @@ function buildTemplate(config) {
       #danger-ring.active { animation: danger-flash .35s ease-in-out infinite; }
     </style>
     <div id="scene">
-      <div id="hitbox" role="button" tabindex="0" aria-label="GLaDOS tap action"></div>
-      <svg id="glados-svg" viewBox="0 116 280 320" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <div id="hitbox" role="button" tabindex="0" aria-label="AXiDOS tap action"></div>
+      <svg id="axidos-svg" viewBox="0 116 280 320" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
           <linearGradient id="ceramicGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8a8d94"/><stop offset="8%" stop-color="#b0b4bc"/><stop offset="8.5%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffffff"/><stop offset="75%" stop-color="#ffffff"/><stop offset="91.5%" stop-color="#e8eaec"/><stop offset="92%" stop-color="#a0a4ac"/><stop offset="100%" stop-color="#6a6d75"/></linearGradient>
           <linearGradient id="ceramicBackgroundGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4a4d54"/><stop offset="8%" stop-color="#70747c"/><stop offset="8.5%" stop-color="#b0b4bc"/><stop offset="25%" stop-color="#b0b4bc"/><stop offset="75%" stop-color="#b0b4bc"/><stop offset="91.5%" stop-color="#a0a4ac"/><stop offset="92%" stop-color="#6a6d75"/><stop offset="100%" stop-color="#3a3d44"/></linearGradient>
@@ -349,9 +349,9 @@ function buildTemplate(config) {
             </g>
           </g>
         </g>
-        <g id="glados-head-wrapper" transform="translate(0, -65)">
+        <g id="axidos-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
-            <g id="glados-head">
+            <g id="axidos-head">
               <g id="head-groove">
               <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
@@ -416,12 +416,12 @@ function buildTemplate(config) {
 }
 
 // src/animator.js
-var GladosAnimator = class {
+var AxidosAnimator = class {
   constructor(shadowRoot) {
     const root = shadowRoot;
     this.el = {
-      svg: root.getElementById("glados-svg"),
-      head: root.getElementById("glados-head"),
+      svg: root.getElementById("axidos-svg"),
+      head: root.getElementById("axidos-head"),
       headGroove: root.getElementById("head-groove"),
       headBop: root.getElementById("head-bop"),
       torsoSwivel: root.getElementById("torso-swivel"),
@@ -525,7 +525,7 @@ var GladosAnimator = class {
     this._rafs.clear();
     this._anims.clear();
   }
-  // ---- Motion primitives (1:1 ports of the original initGlados closures) ----
+  // ---- Motion primitives (1:1 ports of the original initAxidos closures) ----
   setHead(rot, tx, ty, scale = 1, dur, ease = "cubic-bezier(0.34,1.06,0.64,1)") {
     this.el.head.style.transition = `transform ${dur}s ${ease}`;
     this.el.head.style.transform = `translate3d(${tx}px,${ty}px,0) rotate(${rot}deg) scale(${scale})`;
@@ -600,7 +600,7 @@ var GladosAnimator = class {
   }
   /**
    * Freeze all in-flight head/torso motion so a tap bop owns the head
-   * exclusively. Snapshots the live computed transforms of #glados-head and
+   * exclusively. Snapshots the live computed transforms of #axidos-head and
    * #torso-swivel into their inline styles with transition disabled —
    * halting any running CSS transition mid-flight — then cancels the
    * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern
@@ -1550,8 +1550,8 @@ function applyState(card, mapped, bpm) {
   applyStateVisuals(card, mapped, bpm);
 }
 
-// src/glados-card.js
-var GladosCard = class extends HTMLElement {
+// src/axidos-card.js
+var AxidosCard = class extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -1579,7 +1579,7 @@ var GladosCard = class extends HTMLElement {
       const prevState = this._state;
       this._teardownAnimation();
       this.setupDOM();
-      this.initGlados();
+      this.initAxidos();
       applyState(this, prevState || "idle", this._currentBpm);
     }
   }
@@ -1588,7 +1588,7 @@ var GladosCard = class extends HTMLElement {
     this._hass = hass;
     if (!this.contentReady) {
       this.setupDOM();
-      this.initGlados();
+      this.initAxidos();
       this.contentReady = true;
     }
     const entity = this.config.entity;
@@ -1664,8 +1664,8 @@ var GladosCard = class extends HTMLElement {
   setupDOM() {
     this.shadowRoot.innerHTML = buildTemplate(this.config);
   }
-  initGlados() {
-    this.animator = new GladosAnimator(this.shadowRoot);
+  initAxidos() {
+    this.animator = new AxidosAnimator(this.shadowRoot);
     this._hitbox = this.animator.el.hitbox;
     if (this._tapHandler && this._hitbox) {
       this._hitbox.removeEventListener("click", this._tapHandler);
@@ -1677,7 +1677,7 @@ var GladosCard = class extends HTMLElement {
       try {
         bopHead(this);
       } catch (err) {
-        console.warn("glados-card: bop failed", err);
+        console.warn("axidos-card: bop failed", err);
       }
       const actionObj = this.config.tap_action || { action: "none" };
       if (actionObj.action === "none") return;
@@ -1726,14 +1726,14 @@ var GladosCard = class extends HTMLElement {
 };
 
 // src/index.js
-customElements.define("glados-card", GladosCard);
+customElements.define("axidos-card", AxidosCard);
 window.customCards = window.customCards || [];
-if (!window.customCards.some((c) => c.type === "glados-card")) {
+if (!window.customCards.some((c) => c.type === "axidos-card")) {
   window.customCards.push({
-    type: "glados-card",
-    name: "GLaDOS Custom Card",
+    type: "axidos-card",
+    name: "AXiDOS Avatar Card",
     preview: true,
-    description: "A responsive, animated GLaDOS AI assistant card that reacts to voice and dances to music.",
-    documentationURL: "https://github.com/adix992/GLaDOS-AI-Animation"
+    description: "A responsive, animated AXiDOS avatar card that reacts to voice and dances to music.",
+    documentationURL: "https://github.com/Axildor/AXiDOS-Avatar-Card"
   });
 }

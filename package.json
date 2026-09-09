@@ -1,11 +1,11 @@
 {
-  "name": "glados-ai-animation",
+  "name": "axidos-avatar-card",
   "version": "1.0.0",
-  "description": "GLaDOS AI Animation Card for Home Assistant — modular source, bundled to a single HACS-distributable file",
+  "description": "AXiDOS Avatar Card for Home Assistant — modular source, bundled to a single HACS-distributable file",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "verify": "node build.mjs && node --check glados-card.js"
+    "verify": "node build.mjs && node --check axidos-card.js"
   },
   "devDependencies": {
     "esbuild": "^0.24.0"

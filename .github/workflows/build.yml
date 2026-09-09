@@ -32,9 +32,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet glados-card.js; then
-            git add glados-card.js
-            git commit -m "chore: rebuild glados-card.js from src/ [skip ci]"
+          if ! git diff --quiet axidos-card.js; then
+            git add axidos-card.js
+            git commit -m "chore: rebuild axidos-card.js from src/ [skip ci]"
             git push
           else
             echo "Bundle is up to date with src/"

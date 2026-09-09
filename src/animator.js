@@ -1,5 +1,5 @@
 /**
- * animator.js — GladosAnimator: element refs + motion primitives + resource registry.
+ * animator.js — AxidosAnimator: element refs + motion primitives + resource registry.
  *
  * This class owns every DOM reference and every motion primitive. Behavior
  * modules (idle/dance/talk/bop) drive the SVG exclusively through this class,
@@ -7,12 +7,12 @@
  * stopAll() can guarantee zero leaks on teardown or state change.
  */
 
-export class GladosAnimator {
+export class AxidosAnimator {
   constructor(shadowRoot) {
     const root = shadowRoot;
     this.el = {
-      svg: root.getElementById('glados-svg'),
-      head: root.getElementById('glados-head'),
+      svg: root.getElementById('axidos-svg'),
+      head: root.getElementById('axidos-head'),
       headGroove: root.getElementById('head-groove'),
       headBop: root.getElementById('head-bop'),
       torsoSwivel: root.getElementById('torso-swivel'),
@@ -135,7 +135,7 @@ export class GladosAnimator {
     this._anims.clear();
   }
 
-  // ---- Motion primitives (1:1 ports of the original initGlados closures) ----
+  // ---- Motion primitives (1:1 ports of the original initAxidos closures) ----
 
   setHead(rot, tx, ty, scale = 1.0, dur, ease = 'cubic-bezier(0.34,1.06,0.64,1)') {
     this.el.head.style.transition = `transform ${dur}s ${ease}`;
@@ -220,7 +220,7 @@ export class GladosAnimator {
 
   /**
    * Freeze all in-flight head/torso motion so a tap bop owns the head
-   * exclusively. Snapshots the live computed transforms of #glados-head and
+   * exclusively. Snapshots the live computed transforms of #axidos-head and
    * #torso-swivel into their inline styles with transition disabled —
    * halting any running CSS transition mid-flight — then cancels the
    * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern

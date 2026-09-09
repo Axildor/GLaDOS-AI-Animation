@@ -4,11 +4,11 @@
  * Fixed-timestep damped harmonic oscillator (shared spring.js) drives the
  * #head-bop SVG group — a transform layer nested INSIDE #head-groove, so the
  * bop composes additively with whatever else is animating the head:
- *   #glados-head   — idle poses / dance WAAPI keyframes
+ *   #axidos-head   — idle poses / dance WAAPI keyframes
  *   #head-groove   — dance groove spring bob
  *   #head-bop      — tap bop spring (this file)
  *
- * Because the bop no longer owns #glados-head's transform, background motion
+ * Because the bop no longer owns #axidos-head's transform, background motion
  * can keep running during the bop:
  *  - idle: only the head-pose scheduler pauses on tap; pupil darting and the
  *    lid loop keep running. Once the spring has peaked and decays back to
@@ -48,7 +48,7 @@ import { createSpring } from './spring.js';
 function pauseBackground(card, isDancing) {
   // Freeze in-flight motion FIRST: pausing the idle scheduler or holding the
   // dance only stops NEW moves — a pose transition or keyframe animation
-  // already mid-flight would keep animating #glados-head while the bop
+  // already mid-flight would keep animating #axidos-head while the bop
   // spring bounces #head-bop (two animations fighting over the head).
   // freezeHeadMotion() snapshots the live transforms inline (transition
   // disabled) and cancels the tracked head-keyframes WAAPI animation.

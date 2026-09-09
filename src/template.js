@@ -1,6 +1,6 @@
 /**
  * template.js — Shadow DOM markup: CSS + inline SVG.
- * This is the ONLY file containing the GLaDOS model artwork.
+ * This is the ONLY file containing the AXiDOS model artwork.
  * buildTemplate(config) returns the full innerHTML string for setupDOM().
  */
 
@@ -27,7 +27,7 @@ export function buildTemplate(config) {
       #hitbox { position: absolute; inset: 0; z-index: 100; cursor: pointer; display: none; }
       /* isolation: isolate — the SVG forms its own stacking context so its
          compositor layers don't interleave with the rest of the dashboard. */
-      #glados-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; isolation: isolate; --led-color: #ffb800; --led-opacity: 0.15; }
+      #axidos-svg { width: 100%; height: 100%; display: block; overflow: visible; pointer-events: none; isolation: isolate; --led-color: #ffb800; --led-opacity: 0.15; }
 
       /* ---- Compositor-layer promotion ----
          Every group animated via transform gets will-change: transform so the
@@ -35,16 +35,16 @@ export function buildTemplate(config) {
          (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
          the GPU instead of triggering main-thread SVG repaints. Applied ONLY
          to groups that actually animate — each hint costs GPU memory. */
-      #glados-head, #head-groove, #head-bop, #torso-swivel, #bellows,
+      #axidos-head, #head-groove, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
-      #glados-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
+      #axidos-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
       /* Bop layer: dedicated transform group for the tap-bop spring so it
-         composes additively with idle poses (#glados-head) and the dance
+         composes additively with idle poses (#axidos-head) and the dance
          groove bob (#head-groove) instead of fighting over one transform.
-         Pivots at the neck like #glados-head. */
+         Pivots at the neck like #axidos-head. */
       #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
@@ -58,7 +58,7 @@ export function buildTemplate(config) {
       @keyframes head-ambient-sway { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
 
       #torso-swivel { transform-origin: 140px 116px; transition: transform 2.0s cubic-bezier(0.45,0.05,0.55,0.95); }
-      #glados-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
+      #axidos-head { transform-box: view-box; transform-origin: 140px 285px; transition: transform 1.6s cubic-bezier(0.34, 1.06, 0.64, 1); }
 
       #eye-halo { transition: fill 0.8s ease-in-out; }
       /* Eye pulse: the dance engine scales #eye-center every beat; a short
@@ -72,8 +72,8 @@ export function buildTemplate(config) {
       #danger-ring.active { animation: danger-flash .35s ease-in-out infinite; }
     </style>
     <div id="scene">
-      <div id="hitbox" role="button" tabindex="0" aria-label="GLaDOS tap action"></div>
-      <svg id="glados-svg" viewBox="0 116 280 320" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <div id="hitbox" role="button" tabindex="0" aria-label="AXiDOS tap action"></div>
+      <svg id="axidos-svg" viewBox="0 116 280 320" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
           <linearGradient id="ceramicGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#8a8d94"/><stop offset="8%" stop-color="#b0b4bc"/><stop offset="8.5%" stop-color="#ffffff"/><stop offset="25%" stop-color="#ffffff"/><stop offset="75%" stop-color="#ffffff"/><stop offset="91.5%" stop-color="#e8eaec"/><stop offset="92%" stop-color="#a0a4ac"/><stop offset="100%" stop-color="#6a6d75"/></linearGradient>
           <linearGradient id="ceramicBackgroundGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4a4d54"/><stop offset="8%" stop-color="#70747c"/><stop offset="8.5%" stop-color="#b0b4bc"/><stop offset="25%" stop-color="#b0b4bc"/><stop offset="75%" stop-color="#b0b4bc"/><stop offset="91.5%" stop-color="#a0a4ac"/><stop offset="92%" stop-color="#6a6d75"/><stop offset="100%" stop-color="#3a3d44"/></linearGradient>
@@ -154,9 +154,9 @@ export function buildTemplate(config) {
             </g>
           </g>
         </g>
-        <g id="glados-head-wrapper" transform="translate(0, -65)">
+        <g id="axidos-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
-            <g id="glados-head">
+            <g id="axidos-head">
               <g id="head-groove">
               <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>

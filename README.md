@@ -1,8 +1,10 @@
-# GLaDOS AI Animation Card for Home Assistant
+# AXiDOS Avatar Card for Home Assistant
+
+> Inspired by GLaDOS from Portal. Not affiliated with, endorsed, or sponsored by Valve Corporation.
 
 <img width="954" height="439" alt="image" src="https://github.com/user-attachments/assets/8cf8be88-e375-46d2-9fb8-7db2061b308c" />
 
-A highly responsive, fully animated GLaDOS custom card for Home Assistant. Built using zero-dependency CSS and SVG transitions, this card brings GLaDOS to life on your dashboard as a visual interface for your Voice Assistant satellites.
+A highly responsive, fully animated AXiDOS custom card for Home Assistant. Built using zero-dependency CSS and SVG transitions, this card brings AXiDOS to life on your dashboard as a visual interface for your Voice Assistant satellites.
 
 She tracks your voice assistant's state in real-time, features a randomized idle behavior engine, and includes a **dynamic, mathematically-driven dance engine** that syncs perfectly to your music.
 
@@ -16,7 +18,7 @@ She tracks your voice assistant's state in real-time, features a randomized idle
 
 ## 🪩 The Dynamic Dance Engine
 
-When your configured media player starts playing, GLaDOS enters a dedicated **Spotify Green** dance mode. 
+When your configured media player starts playing, AXiDOS enters a dedicated **Spotify Green** dance mode. 
 
 Instead of a basic looped animation, she features a **Macro-Choreography Math Engine** that actively reads the tempo of your music and chains together **32 unique, tempo-locked dance routines**. Every 16 beats, she randomly switches her style so the animation stays fresh throughout a full song.
 
@@ -32,7 +34,7 @@ Her personality shifts depending on the speed of the music:
 * **Intense & Hardcore (160+ BPM):** Aggressive and chaotic. Deep vertical headbangs, erratic twitching, and mechanical system overrides.
 
 ### ⚠️ Prerequisite for Dancing
-For GLaDOS to sync her movements to the beat, **she needs to know the BPM of the currently playing song**. 
+For AXiDOS to sync her movements to the beat, **she needs to know the BPM of the currently playing song**. 
 
 You will need an integration that provides a BPM sensor for your media player. I highly recommend using **[SongBPM-26](https://github.com/adix992/SongBPM-26)**, an integration specifically created to pull real-time track BPMs for this exact purpose.
 
@@ -45,19 +47,19 @@ You will need an integration that provides a BPM sensor for your media player. I
 4. Click Install and reload your browser.
 
 ### Manual
-1. Download `glados-card.js` from the latest release.
+1. Download `axidos-card.js` from the latest release.
 2. Copy it into your `config/www/` directory.
 3. Go to **Settings** > **Dashboards** > **Top right menu** > **Resources**.
-4. Add `/local/glados-card.js` as a JavaScript Module.
+4. Add `/local/axidos-card.js` as a JavaScript Module.
 
 ## ⚙️ Configuration
 
-You can easily configure the card using the Home Assistant visual editor simply by clicking "Add Card" and searching for "GLaDOS Custom Card". The visual editor uses Home Assistant's native form components (entity pickers, sliders, toggles, and the standard action editor), so it looks and behaves like a first-party card.
+You can easily configure the card using the Home Assistant visual editor simply by clicking "Add Card" and searching for "AXiDOS Avatar Card". The visual editor uses Home Assistant's native form components (entity pickers, sliders, toggles, and the standard action editor), so it looks and behaves like a first-party card.
 
 Alternatively, you can use YAML:
 
 ```yaml
-type: custom:glados-card
+type: custom:axidos-card
 entity: assist_satellite.living_room
 media_entity: media_player.spotify
 bpm_entity: sensor.universal_music_bpm
@@ -71,7 +73,7 @@ tap_action:
 
 | Name | Type | Requirement | Description |
 | :--- | :--- | :--- | :--- |
-| `type` | string | **Required** | Must be `custom:glados-card`. |
+| `type` | string | **Required** | Must be `custom:axidos-card`. |
 | `entity` | string | **Required** | The entity ID of your voice assistant satellite (e.g., `assist_satellite...`). |
 | `media_entity` | string | Optional | The entity ID of your media player. Triggers the dance state when `playing`. |
 | `bpm_entity` | string | Optional | The entity ID of the sensor providing the current song's BPM (requires [SongBPM-26](https://github.com/adix992/SongBPM-26)). Defaults to 120 if missing. |
@@ -87,16 +89,16 @@ tap_action:
 
 ## 🧑‍💻 Development
 
-The card source lives in small, focused ES modules under `src/` and is bundled into the single `glados-card.js` file that HACS distributes.
+The card source lives in small, focused ES modules under `src/` and is bundled into the single `axidos-card.js` file that HACS distributes.
 
 | Module | Responsibility |
 | :--- | :--- |
 | `src/index.js` | Entry point: custom element registration + card picker entry |
-| `src/glados-card.js` | Card lifecycle, config, hass state diffing, tap handlers |
+| `src/axidos-card.js` | Card lifecycle, config, hass state diffing, tap handlers |
 | `src/editor.js` | Declarative `getConfigForm()` schema for HA's native visual editor |
 | `src/config.js` | Config sanitization/clamping (pure functions) |
 | `src/state-mapper.js` | Voice/media/BPM state mapping (pure functions) |
-| `src/template.js` | CSS + inline SVG markup (the GLaDOS model artwork) |
+| `src/template.js` | CSS + inline SVG markup (the AXiDOS model artwork) |
 | `src/animator.js` | Element refs, motion primitives, timer/RAF registry |
 | `src/states.js` | Per-state visual setup (idle/dancing/listening/processing/responding) |
 | `src/behaviors/idle.js` | Weighted idle behaviors, lid loop, pupil darting |
@@ -109,13 +111,13 @@ The card source lives in small, focused ES modules under `src/` and is bundled i
 
 ```bash
 npm install
-npm run build    # bundles src/ -> glados-card.js
+npm run build    # bundles src/ -> axidos-card.js
 npm run verify   # build + syntax check
 ```
 
-A GitHub Actions workflow automatically rebuilds `glados-card.js` on every push to `main`, so the committed bundle always matches the source. When contributing, edit files under `src/` only — never hand-edit `glados-card.js`.
+A GitHub Actions workflow automatically rebuilds `axidos-card.js` on every push to `main`, so the committed bundle always matches the source. When contributing, edit files under `src/` only — never hand-edit `axidos-card.js`.
 
-## �️ Tech Stack & Optimization
+## 🛠️ Tech Stack & Optimization
 
 This card is completely self-contained. It uses no external image files (everything is dynamically drawn via inline SVG), and all lighting blooms, shadows, and metallic reflections are calculated natively by the browser's SVG rendering engine.
 

@@ -1,20 +1,20 @@
 /**
- * glados-card.js — GladosCard: thin lifecycle orchestrator.
+ * axidos-card.js — AxidosCard: thin lifecycle orchestrator.
  *
  * Owns: config lifecycle, hass state diffing, DOM setup, tap/keyboard
  * handlers, visibility handling, and WebKit reflow fix. All animation work
- * is delegated to GladosAnimator + behavior modules via states.js.
+ * is delegated to AxidosAnimator + behavior modules via states.js.
  */
 
 import { sanitizeConfig, getStubConfig } from './config.js';
 import { buildEditorForm } from './editor.js';
 import { resolveState, parseBpm } from './state-mapper.js';
 import { buildTemplate } from './template.js';
-import { GladosAnimator } from './animator.js';
+import { AxidosAnimator } from './animator.js';
 import { applyState } from './states.js';
 import { bopHead } from './behaviors/bop.js';
 
-export class GladosCard extends HTMLElement {
+export class AxidosCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -41,7 +41,7 @@ export class GladosCard extends HTMLElement {
       const prevState = this._state;
       this._teardownAnimation();
       this.setupDOM();
-      this.initGlados();
+      this.initAxidos();
       applyState(this, prevState || 'idle', this._currentBpm);
     }
   }
@@ -51,7 +51,7 @@ export class GladosCard extends HTMLElement {
     this._hass = hass;
     if (!this.contentReady) {
       this.setupDOM();
-      this.initGlados();
+      this.initAxidos();
       this.contentReady = true;
     }
     const entity = this.config.entity;
@@ -148,8 +148,8 @@ export class GladosCard extends HTMLElement {
     this.shadowRoot.innerHTML = buildTemplate(this.config);
   }
 
-  initGlados() {
-    this.animator = new GladosAnimator(this.shadowRoot);
+  initAxidos() {
+    this.animator = new AxidosAnimator(this.shadowRoot);
     this._hitbox = this.animator.el.hitbox;
 
     // ---- Tap handler: bop + official native HA Lovelace action dispatch ----
@@ -162,7 +162,7 @@ export class GladosCard extends HTMLElement {
       e.preventDefault();
 
       // Guarded: an animation failure must never block the action dispatch.
-      try { bopHead(this); } catch (err) { console.warn('glados-card: bop failed', err); }
+      try { bopHead(this); } catch (err) { console.warn('axidos-card: bop failed', err); }
 
       const actionObj = this.config.tap_action || { action: 'none' };
       if (actionObj.action === 'none') return;

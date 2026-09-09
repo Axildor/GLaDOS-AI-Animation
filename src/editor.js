@@ -1,5 +1,5 @@
 /**
- * editor.js — Declarative visual editor schema for GladosCard.
+ * editor.js — Declarative visual editor schema for AxidosCard.
  *
  * Uses HA's native getConfigForm() / ha-form pipeline (the same mechanism
  * mushroom cards and the pill logger card use) so the editor renders with
@@ -137,8 +137,8 @@ export function buildEditorForm() {
         return undefined;
       }
       const helpers = {
-        entity: 'The assist_satellite entity GLaDOS reacts to (required).',
-        media_entity: 'When this media player plays, GLaDOS dances to the BPM sensor.',
+        entity: 'The assist_satellite entity AXiDOS reacts to (required).',
+        media_entity: 'When this media player plays, AXiDOS dances to the BPM sensor.',
         bpm_entity: 'Sensor providing the current song BPM (e.g. SongBPM-26). Defaults to 120.',
         respond_delay: 'Seconds to wait before switching from Processing to Responding.',
         zoom: 'Scale percentage of the SVG model inside the card. Above 100 the card grows to keep the model fully visible.',
@@ -148,7 +148,7 @@ export function buildEditorForm() {
         tap_speed: '0.1 = slow, 0.5 = normal, 2.0 = fast.',
         tap_intensity: 'How far the head pulls back.',
         tap_bounces: 'Full oscillation cycles before settling.',
-        tap_bop_resume: 'Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if GLaDOS was dancing. Low = resume late, high = resume early.',
+        tap_bop_resume: 'Point in the bop tail (fraction of max bounce) where the paused background resumes: idle head poses, or the dance choreography if AXiDOS was dancing. Low = resume late, high = resume early.',
       };
       return helpers[schema.name];
     },

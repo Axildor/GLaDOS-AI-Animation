@@ -1,6 +1,6 @@
 /**
  * behaviors/talk.js — Responding-state talk animation.
- * Cycles through TALK_MOVES while GLaDOS "speaks".
+ * Cycles through TALK_MOVES while AXiDOS "speaks".
  *
  * Tracked resource name: 'talk-step'.
  */

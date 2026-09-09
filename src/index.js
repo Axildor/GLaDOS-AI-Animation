@@ -5,17 +5,17 @@
  * editor.js) — no custom editor element is registered.
  */
 
-import { GladosCard } from './glados-card.js';
+import { AxidosCard } from './axidos-card.js';
 
-customElements.define('glados-card', GladosCard);
+customElements.define('axidos-card', AxidosCard);
 
 window.customCards = window.customCards || [];
-if (!window.customCards.some((c) => c.type === 'glados-card')) {
+if (!window.customCards.some((c) => c.type === 'axidos-card')) {
   window.customCards.push({
-    type: 'glados-card',
-    name: 'GLaDOS Custom Card',
+    type: 'axidos-card',
+    name: 'AXiDOS Avatar Card',
     preview: true,
-    description: 'A responsive, animated GLaDOS AI assistant card that reacts to voice and dances to music.',
-    documentationURL: 'https://github.com/adix992/GLaDOS-AI-Animation',
+    description: 'A responsive, animated AXiDOS avatar card that reacts to voice and dances to music.',
+    documentationURL: 'https://github.com/Axildor/AXiDOS-Avatar-Card',
   });
 }

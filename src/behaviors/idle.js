@@ -1,8 +1,8 @@
 /**
  * behaviors/idle.js — Weighted idle behavior engine, lid loop, pupil darting.
  *
- * All functions take `card` (the GladosCard instance) which exposes:
- *   card.animator  — GladosAnimator (motion primitives + tracked scheduling)
+ * All functions take `card` (the AxidosCard instance) which exposes:
+ *   card.animator  — AxidosAnimator (motion primitives + tracked scheduling)
  *   card._state    — current internal state ('idle' | 'listening' | ...)
  *   card.config    — sanitized config
  *
