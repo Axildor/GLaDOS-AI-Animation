@@ -227,19 +227,18 @@ function buildTemplate(config) {
       /* ---- Compositor-layer promotion ----
          Every group animated via transform gets will-change: transform so the
          browser hoists it to its own GPU layer: per-frame transform writes
-         (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
-         the GPU instead of triggering main-thread SVG repaints. Applied ONLY
-         to groups that actually animate \u2014 each hint costs GPU memory. */
-      #axidos-head, #head-groove, #head-bop, #torso-swivel, #bellows,
+         (RAF spring loop, CSS transitions) then composite on the GPU instead
+         of triggering main-thread SVG repaints. Applied ONLY to groups that
+         actually animate \u2014 each hint costs GPU memory. */
+      #axidos-head, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
       #axidos-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
       /* Bop layer: dedicated transform group for the tap-bop spring so it
-         composes additively with idle poses (#axidos-head) and the dance
-         groove bob (#head-groove) instead of fighting over one transform.
-         Pivots at the neck like #axidos-head. */
+         composes additively with the head poses (#axidos-head) instead of
+         fighting over one transform. Pivots at the neck like #axidos-head. */
       #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
@@ -352,7 +351,6 @@ function buildTemplate(config) {
         <g id="axidos-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
             <g id="axidos-head">
-              <g id="head-groove">
               <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>
@@ -422,7 +420,6 @@ var AxidosAnimator = class {
     this.el = {
       svg: root.getElementById("axidos-svg"),
       head: root.getElementById("axidos-head"),
-      headGroove: root.getElementById("head-groove"),
       headBop: root.getElementById("head-bop"),
       torsoSwivel: root.getElementById("torso-swivel"),
       hitbox: root.getElementById("hitbox"),
@@ -446,7 +443,6 @@ var AxidosAnimator = class {
     this.currentLedOpacity = "0.15";
     this._timers = /* @__PURE__ */ new Map();
     this._rafs = /* @__PURE__ */ new Map();
-    this._anims = /* @__PURE__ */ new Map();
   }
   // ---- Tracked scheduling (the ONLY way behaviors may schedule work) ----
   setTimeout(name, fn, delay) {
@@ -481,49 +477,12 @@ var AxidosAnimator = class {
       this._rafs.delete(name);
     }
   }
-  cancelAnim(name) {
-    const anim = this._anims.get(name);
-    if (anim !== void 0) {
-      anim.cancel();
-      this._anims.delete(name);
-    }
-  }
-  /**
-   * Play a tracked Web Animations API animation. `keyframes` is an array of
-   * {transform, offset?, easing?} objects; `opts` is {duration, easing, fill}.
-   * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
-   *
-   * `frozenTransform` (optional): the element's current transform as a CSS
-   * string, supplied by the caller when it already knows the live pose (e.g.
-   * dance.js tracks lastPose). Supplying it avoids a getComputedStyle() call
-   * — a forced synchronous style recalc — on every animation start, which
-   * matters on slow tablet CPUs where each recalc eats frame budget.
-   */
-  playAnim(name, el, keyframes, opts, frozenTransform) {
-    try {
-      let t = frozenTransform;
-      if (!t) {
-        t = getComputedStyle(el).transform;
-      }
-      if (t && t !== "none") {
-        el.style.transition = "none";
-        el.style.transform = t;
-      }
-    } catch (err) {
-    }
-    this.cancelAnim(name);
-    const anim = el.animate(keyframes, opts);
-    this._anims.set(name, anim);
-    return anim;
-  }
-  /** Tear down every tracked timer, RAF, and WAAPI animation. */
+  /** Tear down every tracked timer and RAF. */
   stopAll() {
     for (const id of this._timers.values()) clearTimeout(id);
     for (const id of this._rafs.values()) cancelAnimationFrame(id);
-    for (const anim of this._anims.values()) anim.cancel();
     this._timers.clear();
     this._rafs.clear();
-    this._anims.clear();
   }
   // ---- Motion primitives (1:1 ports of the original initAxidos closures) ----
   setHead(rot, tx, ty, scale = 1, dur, ease = "cubic-bezier(0.34,1.06,0.64,1)") {
@@ -557,36 +516,6 @@ var AxidosAnimator = class {
     this._applyBellows(0.15);
   }
   /**
-   * Keyframed head move over dur seconds. frames is an array of
-   * { pose: [rot, tx, ty, scale], offset?: 0..1, easing?: string }.
-   * Omitting offset 0 lets the move start from the head's current pose.
-   * Played as a tracked WAAPI animation (anticipation -> hit -> settle).
-   *
-   * `currentPose` (optional): the head's live pose [rot, tx, ty, scale] as
-   * already tracked by the caller (dance.js lastPose). Used to build the
-   * cancel-snap freeze transform without a getComputedStyle() recalc.
-   */
-  setHeadKeyframes(frames, dur, currentPose) {
-    const keyframes = frames.map((f) => {
-      const p = f.pose;
-      const kf = {
-        transform: `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`
-      };
-      if (f.offset !== void 0) kf.offset = f.offset;
-      if (f.easing) kf.easing = f.easing;
-      return kf;
-    });
-    let frozen;
-    if (currentPose) {
-      const p = currentPose;
-      frozen = `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`;
-    }
-    return this.playAnim("head-keyframes", this.el.head, keyframes, {
-      duration: dur * 1e3,
-      fill: "forwards"
-    }, frozen);
-  }
-  /**
    * Pump the bellows: amount in px (positive = compress upward). Composes
    * with the pupil-driven bellows offset so the two don't clobber each other.
    */
@@ -602,14 +531,12 @@ var AxidosAnimator = class {
    * Freeze all in-flight head/torso motion so a tap bop owns the head
    * exclusively. Snapshots the live computed transforms of #axidos-head and
    * #torso-swivel into their inline styles with transition disabled —
-   * halting any running CSS transition mid-flight — then cancels the
-   * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern
-   * from playAnim() prevents the element falling back to a stale transform).
+   * halting any running CSS transition mid-flight.
    *
    * Used by the tap bop: pausing the idle scheduler or holding the dance
    * only stops NEW moves; without this freeze, an in-flight pose transition
-   * or keyframe move keeps animating the head while the bop spring bounces
-   * the #head-bop layer — two animations fighting over the same visual.
+   * keeps animating the head while the bop spring bounces the #head-bop
+   * layer — two animations fighting over the same visual.
    */
   freezeHeadMotion() {
     for (const el of [this.el.head, this.el.torsoSwivel]) {
@@ -625,12 +552,6 @@ var AxidosAnimator = class {
       } catch (err) {
       }
     }
-    this.cancelAnim("head-keyframes");
-  }
-  /** Reset the groove layer transform (spring layer on the head). */
-  resetGroove() {
-    this.cancelRaf("dance-groove-raf");
-    if (this.el.headGroove) this.el.headGroove.style.transform = "";
   }
   /**
    * Ease-clear the bop layer transform (tap-bop spring layer on the head).
@@ -865,69 +786,6 @@ function startIdleHeadPoses(card) {
 function stopIdleCycle(card) {
   stopIdleHeadPoses(card);
   card.animator.clearTimeout("idle-pupil");
-}
-
-// src/behaviors/spring.js
-var TIME_STEP = 16.666;
-function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
-  const stiffness = omega * omega;
-  const damping = 2 * omega * dampingRatio;
-  const spring = {
-    position: 0,
-    velocity: 0,
-    _accumulator: 0,
-    injectVelocity(v) {
-      spring.velocity += v;
-    },
-    /**
-     * Energy-add kick: boost the spring by one kick's worth of kinetic
-     * energy WITHOUT cancelling its current motion. The new velocity keeps
-     * the current direction and gains magnitude:
-     *   v' = sign(v) * sqrt(v^2 + v0^2)
-     * so a tap ALWAYS amplifies the bounce — tapping while the head is
-     * rising (negative v) no longer partially cancels the injected energy
-     * the way injectVelocity(+v0) did. At the extremes (v = 0) this
-     * degenerates to a plain injection.
-     *
-     * `maxVelocity` (optional) clamps the result so rapid clicking cannot
-     * accumulate unbounded amplitude and launch the head off-screen.
-     */
-    kick(v0, maxVelocity) {
-      const v = spring.velocity;
-      const sign = v >= 0 ? 1 : -1;
-      let boosted = sign * Math.sqrt(v * v + v0 * v0);
-      if (maxVelocity !== void 0 && Math.abs(boosted) > maxVelocity) {
-        boosted = sign * maxVelocity;
-      }
-      spring.velocity = boosted;
-    },
-    reset() {
-      spring.position = 0;
-      spring.velocity = 0;
-      spring._accumulator = 0;
-    },
-    /**
-     * Advance the simulation by dtMs of wall time using fixed sub-steps.
-     * Returns true once the spring has settled (pos & vel below threshold).
-     */
-    step(dtMs) {
-      spring._accumulator += dtMs;
-      let settled = true;
-      let stepped = false;
-      while (spring._accumulator >= TIME_STEP) {
-        stepped = true;
-        const force = -stiffness * spring.position - damping * spring.velocity;
-        spring.velocity += force;
-        spring.position += spring.velocity;
-        spring._accumulator -= TIME_STEP;
-        if (Math.abs(spring.position) >= settleThreshold || Math.abs(spring.velocity) >= settleThreshold) {
-          settled = false;
-        }
-      }
-      return settled && stepped;
-    }
-  };
-  return spring;
 }
 
 // src/behaviors/choreography.js
@@ -1326,20 +1184,14 @@ function getBeatPose(tierIdx, phraseId, b, variant, energy, nextEntry) {
 }
 
 // src/behaviors/dance.js
-function readHeadPose(a) {
-  try {
-    const t = getComputedStyle(a.el.head).transform;
-    if (!t || t === "none") return [0, 0, 0, 1];
-    const m = t.match(/matrix\(([^)]+)\)/);
-    if (!m) return [0, 0, 0, 1];
-    const [m11, m12, , , e, f] = m[1].split(",").map(Number);
-    const scale = Math.sqrt(m11 * m11 + m12 * m12) || 1;
-    const rot = Math.atan2(m12, m11) * 180 / Math.PI;
-    return [rot, e, f, scale];
-  } catch (err) {
-    return [0, 0, 0, 1];
-  }
-}
+var DANCE_EASINGS = {
+  hitDown: "cubic-bezier(0.34, 1.4, 0.64, 1)",
+  hitOff: "cubic-bezier(0.2, 0.9, 0.3, 1)",
+  flow: "ease-in-out"
+};
+var HIT_DOWN_EASE = DANCE_EASINGS.hitDown;
+var HIT_OFF_EASE = DANCE_EASINGS.hitOff;
+var FLOW_EASE = DANCE_EASINGS.flow;
 function startDanceCycle(card, bpm) {
   const a = card.animator;
   stopDanceCycle(card);
@@ -1349,35 +1201,13 @@ function startDanceCycle(card, bpm) {
   const beatSec = beatMs / 1e3;
   let expectedNextTick = performance.now() + beatMs;
   const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
+  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];
   let phraseId = 0;
   let phraseCount = 0;
   let variant = phraseVariant(tierIdx, phraseId, phraseCount);
   let nextPhraseId = null;
-  const grooveOmega = Math.max(0.08, Math.min(0.3, 2 * Math.PI * 16.666 / (beatMs * 2)));
-  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.55, settleThreshold: 0.05 });
-  const kickDown = (4 + tierIdx * 2) * grooveOmega;
-  const kickOff = kickDown * 0.55;
-  let lastGrooveTime = performance.now();
-  const grooveLoop = (now) => {
-    if (card._state !== "dancing") return;
-    let frameTime = now - lastGrooveTime;
-    lastGrooveTime = now;
-    if (frameTime > 100) frameTime = 16.666;
-    if (!card._danceHeld) {
-      groove.step(frameTime);
-      if (a.el.headGroove) {
-        a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
-      }
-    }
-    a.requestRaf("dance-groove-raf", grooveLoop);
-  };
-  a.requestRaf("dance-groove-raf", grooveLoop);
-  let lastPose = readHeadPose(a);
-  const overshoot = [1.08, 1.12, 1.18, 1.25][tierIdx];
-  const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];
-  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];
-  let wasHeld = false;
-  let prevMoveFlow = false;
+  let lastLedOpacity = null;
+  let lastHalo = null;
   const step = () => {
     if (card._state !== "dancing") return;
     const executeTick = () => {
@@ -1392,14 +1222,8 @@ function startDanceCycle(card, bpm) {
       a.setTimeout("dance-step", step, delay);
     };
     if (card._danceHeld) {
-      wasHeld = true;
       executeTick();
       return;
-    }
-    if (wasHeld) {
-      lastPose = readHeadPose(a);
-      wasHeld = false;
-      prevMoveFlow = false;
     }
     const b = dancePhase % 16;
     if (b === 0 && dancePhase > 0 && nextPhraseId !== null) {
@@ -1410,35 +1234,38 @@ function startDanceCycle(card, bpm) {
     }
     const isDownBeat = b % 2 === 0;
     const energy = getEnergy(dancePhase);
-    if (currentBpm >= 90 || isDownBeat) {
-      groove.injectVelocity(isDownBeat ? kickDown : kickOff);
-    }
     if (b === 12 && nextPhraseId === null) {
       nextPhraseId = pickNextPhrase(tierIdx, phraseId, getEnergy(dancePhase + 16), phraseCount);
     }
     const nextEntry = nextPhraseId !== null && b >= 13 ? getPhraseEntry(tierIdx, nextPhraseId) : null;
     const move = getBeatPose(tierIdx, phraseId, b, variant, energy, nextEntry);
-    a.setLEDs("#1DB954", "1");
-    a.el.eyeHalo.style.opacity = move.halo ? String(move.halo) : "0.5";
+    if (lastLedOpacity !== "1") {
+      a.setLEDs("#1DB954", "1");
+      lastLedOpacity = "1";
+    }
+    const halo = move.halo ? String(move.halo) : "0.5";
+    if (lastHalo !== halo) {
+      a.el.eyeHalo.style.opacity = halo;
+      lastHalo = halo;
+    }
     a.el.eyeCenter.style.transform = `scale(${eyeHitScale})`;
     a.setBellows(move.pump, 0.12);
     a.setTimeout("dance-led", () => {
       if (card._state === "dancing") {
-        a.setLEDs("#1DB954", "0.15");
+        if (lastLedOpacity !== "0.15") {
+          a.setLEDs("#1DB954", "0.15");
+          lastLedOpacity = "0.15";
+        }
         a.el.eyeHalo.style.opacity = "0.05";
+        lastHalo = "0.05";
         a.el.eyeCenter.style.transform = "scale(1)";
         a.setBellows(0, 0.3);
       }
     }, beatMs * 0.3);
-    if (tierIdx >= 1) {
+    if (tierIdx === 1) {
       a.setTimeout("dance-sync", () => {
         if (card._state !== "dancing") return;
-        groove.injectVelocity(-kickOff * 0.35);
         a.setPupil((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 3);
-        a.setLEDs("#1DB954", "0.5");
-        a.setTimeout("dance-sync-led", () => {
-          if (card._state === "dancing") a.setLEDs("#1DB954", "0.15");
-        }, beatMs * 0.15);
       }, beatMs * 0.5);
     }
     let moveDur = move.durBeats * beatSec;
@@ -1447,44 +1274,8 @@ function startDanceCycle(card, bpm) {
     } else {
       moveDur = Math.min(moveDur, beatSec * 0.95);
     }
-    if (prevMoveFlow) {
-      lastPose = readHeadPose(a);
-    }
-    const target = [move.r, move.tx, move.ty, move.s];
-    let frames;
-    if (move.flow) {
-      frames = [
-        { pose: lastPose, offset: 0, easing: "ease-in-out" },
-        { pose: target }
-      ];
-    } else {
-      const hitPose = [move.r * overshoot, move.tx * overshoot, move.ty * overshoot, 1 + (move.s - 1) * overshoot];
-      if (isDownBeat) {
-        const wScale = [0.5, 0.3, 0.2, 0.15][tierIdx];
-        const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];
-        const anti = [
-          -move.r * windup * wScale,
-          -move.tx * windup * wScale,
-          -move.ty * windup * wScale,
-          1 - (move.s - 1) * windup * wScale * 0.5
-        ];
-        frames = [
-          { pose: lastPose, offset: 0, easing: "ease-in" },
-          { pose: anti, offset: windupFrac, easing: "ease-out" },
-          { pose: hitPose, offset: windupFrac + (1 - windupFrac) * 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
-          { pose: target }
-        ];
-      } else {
-        frames = [
-          { pose: lastPose, offset: 0, easing: "ease-in-out" },
-          { pose: hitPose, offset: 0.55, easing: "cubic-bezier(0.2, 0.9, 0.3, 1)" },
-          { pose: target }
-        ];
-      }
-    }
-    a.setHeadKeyframes(frames, moveDur, lastPose);
-    lastPose = target;
-    prevMoveFlow = move.flow;
+    const ease = move.flow ? FLOW_EASE : isDownBeat ? HIT_DOWN_EASE : HIT_OFF_EASE;
+    a.setHead(move.r, move.tx, move.ty, move.s, moveDur, ease);
     if (move.dart) a.setPupil(move.dart[0], move.dart[1]);
     a.setBodySwivel(move.r * -0.5, 1, beatSec * 3);
     const lid = Math.max(move.lid, currentBpm < 125 ? 0.15 : 0.08);
@@ -1498,17 +1289,6 @@ function stopDanceCycle(card) {
   a.clearTimeout("dance-step");
   a.clearTimeout("dance-led");
   a.clearTimeout("dance-sync");
-  a.clearTimeout("dance-sync-led");
-  try {
-    const t = getComputedStyle(a.el.head).transform;
-    if (t && t !== "none") {
-      a.el.head.style.transition = "none";
-      a.el.head.style.transform = t;
-    }
-  } catch (err) {
-  }
-  a.cancelAnim("head-keyframes");
-  a.resetGroove();
   a.setBellows(0, 0.3);
 }
 
@@ -1541,6 +1321,69 @@ function startTalkAnim(card) {
 }
 function stopTalkAnim(card) {
   card.animator.clearTimeout("talk-step");
+}
+
+// src/behaviors/spring.js
+var TIME_STEP = 16.666;
+function createSpring({ omega, dampingRatio, settleThreshold = 0.08 }) {
+  const stiffness = omega * omega;
+  const damping = 2 * omega * dampingRatio;
+  const spring = {
+    position: 0,
+    velocity: 0,
+    _accumulator: 0,
+    injectVelocity(v) {
+      spring.velocity += v;
+    },
+    /**
+     * Energy-add kick: boost the spring by one kick's worth of kinetic
+     * energy WITHOUT cancelling its current motion. The new velocity keeps
+     * the current direction and gains magnitude:
+     *   v' = sign(v) * sqrt(v^2 + v0^2)
+     * so a tap ALWAYS amplifies the bounce — tapping while the head is
+     * rising (negative v) no longer partially cancels the injected energy
+     * the way injectVelocity(+v0) did. At the extremes (v = 0) this
+     * degenerates to a plain injection.
+     *
+     * `maxVelocity` (optional) clamps the result so rapid clicking cannot
+     * accumulate unbounded amplitude and launch the head off-screen.
+     */
+    kick(v0, maxVelocity) {
+      const v = spring.velocity;
+      const sign = v >= 0 ? 1 : -1;
+      let boosted = sign * Math.sqrt(v * v + v0 * v0);
+      if (maxVelocity !== void 0 && Math.abs(boosted) > maxVelocity) {
+        boosted = sign * maxVelocity;
+      }
+      spring.velocity = boosted;
+    },
+    reset() {
+      spring.position = 0;
+      spring.velocity = 0;
+      spring._accumulator = 0;
+    },
+    /**
+     * Advance the simulation by dtMs of wall time using fixed sub-steps.
+     * Returns true once the spring has settled (pos & vel below threshold).
+     */
+    step(dtMs) {
+      spring._accumulator += dtMs;
+      let settled = true;
+      let stepped = false;
+      while (spring._accumulator >= TIME_STEP) {
+        stepped = true;
+        const force = -stiffness * spring.position - damping * spring.velocity;
+        spring.velocity += force;
+        spring.position += spring.velocity;
+        spring._accumulator -= TIME_STEP;
+        if (Math.abs(spring.position) >= settleThreshold || Math.abs(spring.velocity) >= settleThreshold) {
+          settled = false;
+        }
+      }
+      return settled && stepped;
+    }
+  };
+  return spring;
 }
 
 // src/behaviors/bop.js

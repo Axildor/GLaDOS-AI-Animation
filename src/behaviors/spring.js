@@ -1,10 +1,9 @@
 /**
  * behaviors/spring.js — Shared fixed-timestep damped harmonic oscillator.
  *
- * Extracted from bop.js so both the tap bop and the dance groove layer can
- * drive organic spring motion. The integrator runs at a fixed 16.666ms step
- * (frame-rate independent); callers drive it from a RAF loop and read
- * position/velocity each frame.
+ * Drives the tap bop's organic spring motion (behaviors/bop.js). The
+ * integrator runs at a fixed 16.666ms step (frame-rate independent); the
+ * caller drives it from a RAF loop and reads position/velocity each frame.
  */
 
 const TIME_STEP = 16.666;

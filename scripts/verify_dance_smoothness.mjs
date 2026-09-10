@@ -3,37 +3,36 @@
  * smoothness + choreography contract. Runs the real startDanceCycle() with
  * a stubbed animator and asserts, for every tier (70/110/140/180 BPM):
  *
- * Smoothness contract (existing):
- *  1. HIT moves (tiers 1-3) always finish inside the beat (<= 0.95x) —
- *     no mid-flight cancel, no dead freeze between beats.
- *  2. FLOW moves (chill tier, release phrases, resolve handoffs) may span
- *     up to 1.9x beats — continuous travel instead of hit-freeze-hit.
- *  3. Keyframe structure: flow = 2 keyframes; hit downbeat = 4 (windup);
- *     hit offbeat = 3. Tier 0 is all-flow.
- *  4. Pose continuity: the first move's keyframe 0 equals the live head
- *     pose, and the move AFTER a flow move reseeds from the live pose.
- *  5. Cancel-snap guard: cancelling mid-flight freezes the computed
- *     transform into the inline style.
- *  6. Groove spring sanity (calmer 0.55 damping).
- *  7. Body swivel continuity: multi-beat duration, half head rotation.
+ * Execution contract (CSS-transition rework):
+ *  1. One setHead() move per beat — no WAAPI keyframes, no RAF loops, no
+ *     getComputedStyle() recalcs in the dance path (compositor-friendly:
+ *     the browser interpolates off the main thread, WebView-safe).
+ *  2. Duration contract: hit moves <= 0.95x beat (finish before the next
+ *     beat — no dead freeze), flow moves <= 1.9x beat (continuous travel).
+ *  3. Easing contract: flow moves use ease-in-out; hit downbeats use the
+ *     overshoot curve; hit offbeats use the snappy ease-out.
+ *  4. Pose targets match the phrase engine's getBeatPose output exactly.
+ *  5. Bop hold: while _danceHeld is set, the beat clock keeps ticking but
+ *     NO visual writes happen (no setHead, no LED, no swivel, no lid).
  *
  * Choreography contract (phrase-graph rework):
- *  8. Graph legality: every phrase transition is a declared edge in the
+ *  6. Graph legality: every phrase transition is a declared edge in the
  *     tier's transition graph — no random block teleports.
- *  9. Energy gating: peak phrases (energy > 0.8) only start in
+ *  7. Energy gating: peak phrases (energy > 0.8) only start in
  *     high-energy windows (window energy >= phrase energy - margin).
- * 10. Resolve handoff: beats 13-15 are flow glides and the beat-15 target
+ *  8. Resolve handoff: beats 13-15 are flow glides and the beat-15 target
  *     equals the NEXT phrase's entry pose (choreographed handoff, not a
  *     reactive damper).
- * 11. Determinism: two identical runs produce identical pose sequences —
+ *  9. Determinism: two identical runs produce identical pose sequences —
  *     no Math.random in choreography (seeded variants only).
- * 12. Physical laws: PENDULUM (sign(tx) == sign(r) when both significant),
+ * 10. Physical laws: PENDULUM (sign(tx) == sign(r) when both significant),
  *     GRAVITY (downbeat ty > offbeat ty within a phrase; bellows pump > 0
  *     only on downbeats).
+ * 11. Body swivel continuity: multi-beat duration, half head rotation.
+ * 12. Energy arc shape: 64-beat macro envelope hits groove/build/peak/release.
  */
 
-import { startDanceCycle, stopDanceCycle } from '../src/behaviors/dance.js';
-import { createSpring } from '../src/behaviors/spring.js';
+import { startDanceCycle, stopDanceCycle, DANCE_EASINGS } from '../src/behaviors/dance.js';
 import {
   TIERS, getEnergy, pickNextPhrase, phraseVariant, getPhraseEntry, getBeatPose,
 } from '../src/behaviors/choreography.js';
@@ -45,13 +44,12 @@ function makeEl() {
     attrs: {},
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
-    animate() { return { cancel() {} }; },
   };
 }
 
 function makeAnimator() {
   const el = {};
-  for (const k of ['svg', 'head', 'headGroove', 'torsoSwivel', 'hitbox', 'eyeHalo', 'eyeCenter', 'pupil', 'eyeball', 'bellows', 'lidTop', 'lidBot', 'dangerRing']) el[k] = makeEl();
+  for (const k of ['svg', 'head', 'headBop', 'torsoSwivel', 'hitbox', 'eyeHalo', 'eyeCenter', 'pupil', 'eyeball', 'bellows', 'lidTop', 'lidBot', 'dangerRing']) el[k] = makeEl();
   el.ledMatrices = [];
   const a = {
     el,
@@ -60,31 +58,23 @@ function makeAnimator() {
     currentLedOpacity: '0.15',
     _timers: new Map(),
     _rafs: new Map(),
-    _anims: new Map(),
-    _keyframeCalls: [],
+    _headCalls: [],
     _swivelCalls: [],
     _bellowsCalls: [],
+    _rafNames: [],
     setTimeout(name, fn, delay) { this._timers.set(name, { fn, delay }); return name; },
     clearTimeout(name) { this._timers.delete(name); },
-    requestRaf(name, fn) { this._rafs.set(name, fn); return name; },
+    requestRaf(name, fn) { this._rafNames.push(name); this._rafs.set(name, fn); return name; },
     cancelRaf(name) { this._rafs.delete(name); },
-    cancelAnim(name) { this._anims.delete(name); },
-    playAnim(name, elRef, keyframes, opts) {
-      this._keyframeCalls.push({ name, keyframes, opts });
-      this._anims.set(name, { cancel() {} });
-      return { cancel() {} };
+    setHead(rot, tx, ty, s, dur, ease) {
+      this._headCalls.push({ rot, tx, ty, s, dur, ease });
+      this.el.head.style.transform = `translate3d(${tx}px,${ty}px,0) rotate(${rot}deg) scale(${s})`;
     },
-    setHead() {}, resetBodySwivel() {},
+    resetBodySwivel() {},
     setBodySwivel(rot, sx, dur) { this._swivelCalls.push({ rot, dur }); },
-    setHeadKeyframes(frames, dur) {
-      this._keyframeCalls.push({ name: 'head-keyframes', keyframes: frames, opts: { duration: dur * 1000 } });
-      this._anims.set('head-keyframes', { cancel() {} });
-      return { cancel() {} };
-    },
     setLid() {}, setBaseLid(v) { this.currentBaseLid = v; },
     setPupil() {}, setBellows(p) { this._bellowsCalls.push(p); }, setLEDs(c, o) { this.currentLedColor = c; this.currentLedOpacity = o; },
-    resetGroove() { this.cancelRaf('dance-groove-raf'); },
-    stopAll() { this._timers.clear(); this._rafs.clear(); this._anims.clear(); },
+    stopAll() { this._timers.clear(); this._rafs.clear(); },
   };
   return a;
 }
@@ -158,44 +148,63 @@ for (const tier of TIERS_BPM) {
   startDanceCycle(card, tier.bpm);
   runBeats(card, 64);
 
-  const calls = card.animator._keyframeCalls;
-  assert(calls.length >= 32, `pose moves fired (${calls.length} keyframe calls over 64 beats)`);
+  const calls = card.animator._headCalls;
+  assert(calls.length >= 32, `pose moves fired (${calls.length} setHead calls over 64 beats)`);
 
-  // 1+2. Duration contract: hit moves <= 0.95x beat, flow moves <= 1.9x.
-  let durOk = true;
-  for (let i = 0; i < calls.length; i++) {
-    const c = calls[i];
-    const d = c.opts.duration / 1000;
-    const isFlow = c.keyframes.length === 2;
-    const max = isFlow ? flowMax : hitMax;
-    if (d > max + 1e-9 || d < beatSec * 0.3) {
-      durOk = false;
-      console.error(`    call ${i}: bad moveDur ${d.toFixed(3)}s (beat ${beatSec.toFixed(3)}s, max ${max.toFixed(3)}s, flow=${isFlow})`);
-    }
-  }
-  assert(durOk, `all moveDurs within contract (hit <= 0.95x, flow <= 1.9x of ${beatSec.toFixed(3)}s beat) — no mid-flight cancel, no dead freeze`);
+  // 1. No WAAPI / RAF in the dance path: the engine must not register any
+  //    RAF loop (the old groove spring) and must not call el.animate().
+  assert(card.animator._rafNames.length === 0, 'no RAF loops in the dance path (no per-frame JS, compositor-friendly)');
+  assert(card.animator.el.head.animate === undefined, 'no WAAPI keyframes in the dance path (no per-beat cancel/create churn)');
 
-  // 3. Keyframe structure vs the simulated walk: flow = 2 keyframes,
-  //    hit downbeat = 4 (windup), hit offbeat = 3.
+  // 2. Duration contract: hit moves <= 0.95x beat, flow moves <= 1.9x.
   {
     // The engine fires one extra move: startDanceCycle's immediate step()
     // (phase 0) plus one per runBeats iteration (phases 1..64) = 65 calls.
     const walk = simulateWalk(tierIdx, calls.length);
-    let structOk = true;
+    let durOk = true;
     calls.forEach((c, i) => {
-      const expected = walk[i].move.flow ? 2 : walk[i].b % 2 === 0 ? 4 : 3;
-      if (c.keyframes.length !== expected) {
-        structOk = false;
-        console.error(`    call ${i} (phase ${i}, beat ${walk[i].b}): ${c.keyframes.length} keyframes, expected ${expected}`);
+      const isFlow = walk[i].move.flow;
+      const max = isFlow ? flowMax : hitMax;
+      if (c.dur > max + 1e-9 || c.dur < beatSec * 0.3) {
+        durOk = false;
+        console.error(`    call ${i} (phase ${i}, beat ${walk[i].b}): bad moveDur ${c.dur.toFixed(3)}s (beat ${beatSec.toFixed(3)}s, max ${max.toFixed(3)}s, flow=${isFlow})`);
       }
     });
-    assert(structOk, 'keyframe structure matches the phrase engine (flow=2, hit down=4, hit off=3)');
-    if (tierIdx === 0) {
-      assert(walk.every((w) => w.move.flow), 'tier 0 is all-flow: every beat is a glide (no hits)');
-    }
+    assert(durOk, `all moveDurs within contract (hit <= 0.95x, flow <= 1.9x of ${beatSec.toFixed(3)}s beat) — no dead freeze, continuous travel`);
   }
 
-  // 8. Graph legality: every phrase transition is a declared edge.
+  // 3. Easing contract: flow = ease-in-out; hit downbeat = overshoot curve;
+  //    hit offbeat = snappy ease-out.
+  {
+    const walk = simulateWalk(tierIdx, calls.length);
+    let easeOk = true;
+    calls.forEach((c, i) => {
+      const expected = walk[i].move.flow ? DANCE_EASINGS.flow
+        : (walk[i].b % 2 === 0 ? DANCE_EASINGS.hitDown : DANCE_EASINGS.hitOff);
+      if (c.ease !== expected) {
+        easeOk = false;
+        console.error(`    call ${i} (phase ${i}, beat ${walk[i].b}): easing "${c.ease}", expected "${expected}"`);
+      }
+    });
+    assert(easeOk, 'easing contract: flow=ease-in-out, hit down=overshoot curve, hit off=snappy ease-out');
+  }
+
+  // 4. Pose targets match the phrase engine exactly.
+  {
+    const walk = simulateWalk(tierIdx, calls.length);
+    let poseOk = true;
+    calls.forEach((c, i) => {
+      const m = walk[i].move;
+      if (Math.abs(c.rot - m.r) > 1e-9 || Math.abs(c.tx - m.tx) > 1e-9
+        || Math.abs(c.ty - m.ty) > 1e-9 || Math.abs(c.s - m.s) > 1e-9) {
+        poseOk = false;
+        console.error(`    call ${i} (phase ${i}, beat ${walk[i].b}): pose [${c.rot.toFixed(2)}, ${c.tx.toFixed(2)}, ${c.ty.toFixed(2)}, ${c.s.toFixed(3)}] != engine [${m.r.toFixed(2)}, ${m.tx.toFixed(2)}, ${m.ty.toFixed(2)}, ${m.s.toFixed(3)}]`);
+      }
+    });
+    assert(poseOk, 'pose targets match the phrase engine (getBeatPose) exactly');
+  }
+
+  // 6. Graph legality: every phrase transition is a declared edge.
   {
     const walk = simulateWalk(tierIdx, 128);
     let legal = true;
@@ -211,7 +220,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(legal, 'graph walk legality: every phrase transition is a declared edge (no random block teleports)');
 
-    // 9. Energy gating: peak phrases only start in high-energy windows.
+    // 7. Energy gating: peak phrases only start in high-energy windows.
     let gated = true;
     for (const w of walk) {
       if (w.b === 0 && w.phase > 0) {
@@ -224,7 +233,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(gated, 'energy gating: peak phrases only play during high-energy windows (verse/chorus dynamics)');
 
-    // 10. Resolve handoff: beats 13-15 are flow glides and the beat-15
+    // 8. Resolve handoff: beats 13-15 are flow glides and the beat-15
     //     target equals the next phrase's entry pose.
     let handoff = true;
     for (const w of walk) {
@@ -240,7 +249,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(handoff, 'resolve handoff: beats 13-15 glide to the NEXT phrase\'s entry pose (choreographed, not damped)');
 
-    // 12a. PENDULUM law: lateral drift coupled to tilt (same sign).
+    // 10a. PENDULUM law: lateral drift coupled to tilt (same sign).
     let pendulum = true;
     for (const w of walk) {
       if (Math.abs(w.move.r) > 1 && Math.abs(w.move.tx) > 0.1
@@ -251,7 +260,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(pendulum, 'PENDULUM law: tx coupled to r (hanging head swings in an arc, never slides)');
 
-    // 12b. GRAVITY law: downbeat dips deeper than the offbeat rise.
+    // 10b. GRAVITY law: downbeat dips deeper than the offbeat rise.
     //      Scoped to phrase beats (b < 13): the resolve handoff (13-15) is
     //      a deliberate transition glide toward the next phrase's entry
     //      pose, not a groove move — it is exempt, like the old damped
@@ -268,7 +277,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(gravity, 'GRAVITY law: downbeat dips (ty down), offbeat rises — a suspended head dips INTO the beat');
 
-    // 12c. GRAVITY/bellows coupling: pump only on downbeats, never offbeats.
+    // 10c. GRAVITY/bellows coupling: pump only on downbeats, never offbeats.
     let pumpOk = true;
     for (const w of walk) {
       if (w.b % 2 === 1 && w.move.pump !== 0) { pumpOk = false; console.error(`    phase ${w.phase}: offbeat pump ${w.move.pump.toFixed(2)}`); }
@@ -276,7 +285,7 @@ for (const tier of TIERS_BPM) {
     }
     assert(pumpOk, 'bellows pump is gravity-coupled: compresses on the downbeat dip, releases on the rise');
 
-    // 11. Determinism: a second identical walk produces identical poses.
+    // 9. Determinism: a second identical walk produces identical poses.
     const walk2 = simulateWalk(tierIdx, 128);
     let det = walk.length === walk2.length;
     for (let i = 0; det && i < walk.length; i++) {
@@ -291,69 +300,31 @@ for (const tier of TIERS_BPM) {
   stopDanceCycle(card);
 }
 
-// 4a. Pose continuity: first keyframe of the first move equals the live head pose.
+// 5. Bop hold: while _danceHeld is set the beat clock keeps ticking but no
+//    visual writes happen; on release the choreography resumes.
 {
-  console.log('\n== pose continuity ==');
+  console.log('\n== bop hold ==');
   const card = makeCard();
-  // Simulate a head frozen mid-pose (e.g. previous dance was interrupted).
-  // getComputedStyle in browsers always returns matrix() form, so the stub
-  // must too: rotate(6deg) scale(1.02) then translate(3px, 7px).
-  const c6 = Math.cos(6 * Math.PI / 180) * 1.02;
-  const s6 = Math.sin(6 * Math.PI / 180) * 1.02;
-  globalThis.getComputedStyle = () => ({ transform: `matrix(${c6.toFixed(6)}, ${s6.toFixed(6)}, 0, ${c6.toFixed(6)}, 3, 7)` });
-  startDanceCycle(card, 120);
-  const first = card.animator._keyframeCalls[0];
-  const p0 = first.keyframes[0].pose;
-  const poseOk = Math.abs(p0[0] - 6) < 0.5 && Math.abs(p0[1] - 3) < 0.5
-    && Math.abs(p0[2] - 7) < 0.5 && Math.abs(p0[3] - 1.02) < 0.02;
-  assert(poseOk, `first move eases from live pose [rot=${p0[0].toFixed(1)}, tx=${p0[1].toFixed(1)}, ty=${p0[2].toFixed(1)}, s=${p0[3].toFixed(2)}]`);
-  stopDanceCycle(card);
-}
-
-// 4b. Flow reseed: the move after a flow move starts from the LIVE pose
-//     (getComputedStyle), not the stale recorded target.
-{
-  console.log('\n== flow reseed ==');
-  const c8 = Math.cos(9 * Math.PI / 180) * 1.01;
-  const s8 = Math.sin(9 * Math.PI / 180) * 1.01;
-  globalThis.getComputedStyle = () => ({ transform: `matrix(${c8.toFixed(6)}, ${s8.toFixed(6)}, 0, ${c8.toFixed(6)}, -2, 5)` });
-  const card = makeCard();
-  startDanceCycle(card, 70); // tier 0: every move is a flow move
-  runBeats(card, 3);
-  const calls = card.animator._keyframeCalls;
-  const after = calls[2]; // third move: previous two were flow
-  const p0 = after.keyframes[0].pose;
-  const reseedOk = Math.abs(p0[0] - 9) < 0.5 && Math.abs(p0[1] - (-2)) < 0.5
-    && Math.abs(p0[2] - 5) < 0.5 && Math.abs(p0[3] - 1.01) < 0.02;
-  assert(reseedOk, `move after flow reseeds from live pose [rot=${p0[0].toFixed(1)}, tx=${p0[1].toFixed(1)}, ty=${p0[2].toFixed(1)}, s=${p0[3].toFixed(2)}]`);
-  stopDanceCycle(card);
-}
-
-// 5. Cancel-snap guard in stopDanceCycle: live pose frozen into inline style.
-{
-  console.log('\n== cancel-snap guard ==');
-  const card = makeCard();
-  globalThis.getComputedStyle = (el) => ({ transform: el.style.transform || 'translate3d(2px,4px,0) rotate(3deg) scale(1.01)' });
-  startDanceCycle(card, 120);
+  startDanceCycle(card, 110);
   runBeats(card, 2);
+  card._danceHeld = true;
+  const headBefore = card.animator._headCalls.length;
+  const swivelBefore = card.animator._swivelCalls.length;
+  const ledBefore = card.animator.currentLedOpacity;
+  runBeats(card, 3); // beat clock ticks under hold
+  const held = card.animator._headCalls.length === headBefore
+    && card.animator._swivelCalls.length === swivelBefore
+    && card.animator.currentLedOpacity === ledBefore;
+  assert(held, 'bop hold: beat clock ticks but no visual writes (head/swivel/LED frozen)');
+  assert(card.animator._timers.has('dance-step'), 'bop hold: beat clock still ticking (dance-step timer set)');
+  card._danceHeld = false;
+  runBeats(card, 1);
+  assert(card.animator._headCalls.length > headBefore, 'choreography resumes after hold release (setHead fired)');
   stopDanceCycle(card);
-  const frozen = card.animator.el.head.style.transform;
-  assert(typeof frozen === 'string' && frozen.includes('matrix') || (frozen || '').includes('translate3d'), `live pose frozen into inline style before cancel ("${frozen}")`);
 }
 
-// 6. Spring sanity: groove spring still bounces (regression check) with the
-//    calmer 0.55 damping used by the dance groove layer.
-{
-  console.log('\n== groove spring regression ==');
-  const s = createSpring({ omega: 0.2, dampingRatio: 0.55, settleThreshold: 0.05 });
-  s.injectVelocity(0.5);
-  let peak = 0;
-  for (let i = 0; i < 200; i++) { s.step(16.666); peak = Math.max(peak, Math.abs(s.position)); }
-  assert(peak > 1 && peak < 20, `groove spring produces visible bounce (peak ${peak.toFixed(2)} px)`);
-}
-
-// 7. Body swivel continuity: swivel duration is multi-beat (slow sway), and
-//    the rotation is half the head rotation (lagging torso, not a twitch).
+// 11. Body swivel continuity: swivel duration is multi-beat (slow sway), and
+//     the rotation is half the head rotation (lagging torso, not a twitch).
 {
   console.log('\n== body swivel continuity ==');
   const card = makeCard();
@@ -366,7 +337,7 @@ for (const tier of TIERS_BPM) {
   stopDanceCycle(card);
 }
 
-// 13. Energy arc shape: 64-beat macro envelope hits groove/build/peak/release.
+// 12. Energy arc shape: 64-beat macro envelope hits groove/build/peak/release.
 {
   console.log('\n== energy arc ==');
   const e0 = getEnergy(0);   // groove window

@@ -13,7 +13,6 @@ export class AxidosAnimator {
     this.el = {
       svg: root.getElementById('axidos-svg'),
       head: root.getElementById('axidos-head'),
-      headGroove: root.getElementById('head-groove'),
       headBop: root.getElementById('head-bop'),
       torsoSwivel: root.getElementById('torso-swivel'),
       hitbox: root.getElementById('hitbox'),
@@ -41,8 +40,6 @@ export class AxidosAnimator {
     // Centralized resource registry: name -> timer/raf id
     this._timers = new Map();
     this._rafs = new Map();
-    // Tracked WAAPI animations: name -> Animation object
-    this._anims = new Map();
   }
 
   // ---- Tracked scheduling (the ONLY way behaviors may schedule work) ----
@@ -83,56 +80,12 @@ export class AxidosAnimator {
     }
   }
 
-  cancelAnim(name) {
-    const anim = this._anims.get(name);
-    if (anim !== undefined) {
-      anim.cancel();
-      this._anims.delete(name);
-    }
-  }
-
-  /**
-   * Play a tracked Web Animations API animation. `keyframes` is an array of
-   * {transform, offset?, easing?} objects; `opts` is {duration, easing, fill}.
-   * Tracked so stopAll() can cancel it — keeps the zero-leak guarantee.
-   *
-   * `frozenTransform` (optional): the element's current transform as a CSS
-   * string, supplied by the caller when it already knows the live pose (e.g.
-   * dance.js tracks lastPose). Supplying it avoids a getComputedStyle() call
-   * — a forced synchronous style recalc — on every animation start, which
-   * matters on slow tablet CPUs where each recalc eats frame budget.
-   */
-  playAnim(name, el, keyframes, opts, frozenTransform) {
-    // Cancel-snap guard: cancelling a fill:'forwards' animation makes the
-    // element fall back to its stale base transform for a frame before the
-    // new animation's first keyframe applies. Freezing the live transform
-    // into the inline style first removes that snap frame.
-    try {
-      let t = frozenTransform;
-      if (!t) {
-        t = getComputedStyle(el).transform;
-      }
-      if (t && t !== 'none') {
-        el.style.transition = 'none';
-        el.style.transform = t;
-      }
-    } catch (err) { /* stub environments */ }
-    this.cancelAnim(name);
-    const anim = el.animate(keyframes, opts);
-    // NOTE: finished fill:'forwards' animations keep applying their effect,
-    // so they stay tracked until explicitly cancelled or replaced.
-    this._anims.set(name, anim);
-    return anim;
-  }
-
-  /** Tear down every tracked timer, RAF, and WAAPI animation. */
+  /** Tear down every tracked timer and RAF. */
   stopAll() {
     for (const id of this._timers.values()) clearTimeout(id);
     for (const id of this._rafs.values()) cancelAnimationFrame(id);
-    for (const anim of this._anims.values()) anim.cancel();
     this._timers.clear();
     this._rafs.clear();
-    this._anims.clear();
   }
 
   // ---- Motion primitives (1:1 ports of the original initAxidos closures) ----
@@ -174,37 +127,6 @@ export class AxidosAnimator {
   }
 
   /**
-   * Keyframed head move over dur seconds. frames is an array of
-   * { pose: [rot, tx, ty, scale], offset?: 0..1, easing?: string }.
-   * Omitting offset 0 lets the move start from the head's current pose.
-   * Played as a tracked WAAPI animation (anticipation -> hit -> settle).
-   *
-   * `currentPose` (optional): the head's live pose [rot, tx, ty, scale] as
-   * already tracked by the caller (dance.js lastPose). Used to build the
-   * cancel-snap freeze transform without a getComputedStyle() recalc.
-   */
-  setHeadKeyframes(frames, dur, currentPose) {
-    const keyframes = frames.map((f) => {
-      const p = f.pose;
-      const kf = {
-        transform: `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`,
-      };
-      if (f.offset !== undefined) kf.offset = f.offset;
-      if (f.easing) kf.easing = f.easing;
-      return kf;
-    });
-    let frozen;
-    if (currentPose) {
-      const p = currentPose;
-      frozen = `translate3d(${p[1]}px,${p[2]}px,0) rotate(${p[0]}deg) scale(${p[3]})`;
-    }
-    return this.playAnim('head-keyframes', this.el.head, keyframes, {
-      duration: dur * 1000,
-      fill: 'forwards',
-    }, frozen);
-  }
-
-  /**
    * Pump the bellows: amount in px (positive = compress upward). Composes
    * with the pupil-driven bellows offset so the two don't clobber each other.
    */
@@ -222,14 +144,12 @@ export class AxidosAnimator {
    * Freeze all in-flight head/torso motion so a tap bop owns the head
    * exclusively. Snapshots the live computed transforms of #axidos-head and
    * #torso-swivel into their inline styles with transition disabled —
-   * halting any running CSS transition mid-flight — then cancels the
-   * tracked 'head-keyframes' WAAPI animation (the cancel-snap guard pattern
-   * from playAnim() prevents the element falling back to a stale transform).
+   * halting any running CSS transition mid-flight.
    *
    * Used by the tap bop: pausing the idle scheduler or holding the dance
    * only stops NEW moves; without this freeze, an in-flight pose transition
-   * or keyframe move keeps animating the head while the bop spring bounces
-   * the #head-bop layer — two animations fighting over the same visual.
+   * keeps animating the head while the bop spring bounces the #head-bop
+   * layer — two animations fighting over the same visual.
    */
   freezeHeadMotion() {
     for (const el of [this.el.head, this.el.torsoSwivel]) {
@@ -244,13 +164,6 @@ export class AxidosAnimator {
         }
       } catch (err) { /* stub environments */ }
     }
-    this.cancelAnim('head-keyframes');
-  }
-
-  /** Reset the groove layer transform (spring layer on the head). */
-  resetGroove() {
-    this.cancelRaf('dance-groove-raf');
-    if (this.el.headGroove) this.el.headGroove.style.transform = '';
   }
 
   /**

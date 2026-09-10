@@ -16,8 +16,8 @@
  *     LED state restored, and a resume safety-net fires if the threshold
  *     never tripped.
  *  5. Dancing: the dance engine is HELD on tap (_danceHeld) — beat clock
- *     keeps ticking, but pose moves / groove kicks / LED accents are skipped;
- *     the hold releases at the meld point or on settle.
+ *     keeps ticking, but pose moves / LED accents are skipped; the hold
+ *     releases at the meld point or on settle.
  *  6. stopBop: cancels the RAF, nulls the spring, eases the layer home, and
  *     clears the meld/hold flags.
  *  7. Re-tap mid-bop KICKS the spring (energy-add, always amplifies) AND
@@ -28,8 +28,7 @@
  *     (freezeHeadMotion) — no dual animation during the bop.
  * 10. Kick math: energy-add kick amplifies at peak, trough, and mid-rise;
  *     direction preserved; amplitude cap enforced.
- * 11. maxSeen threshold: meld fires at a fraction of the ACTUAL peak, and
- *     the groove layer is frozen while the dance is held.
+ * 11. maxSeen threshold: meld fires at a fraction of the ACTUAL peak.
  */
 
 import { bopHead, stopBop } from '../src/behaviors/bop.js';
@@ -55,13 +54,12 @@ function makeEl() {
     setAttribute(k, v) { this.attrs[k] = v; },
     getAttribute(k) { return this.attrs[k]; },
     setProperty(k, v) { this._props[k] = v; },
-    animate() { return { cancel() {} }; },
   };
 }
 
 function makeAnimator() {
   const el = {};
-  for (const k of ['svg', 'head', 'headGroove', 'headBop', 'torsoSwivel', 'hitbox',
+  for (const k of ['svg', 'head', 'headBop', 'torsoSwivel', 'hitbox',
     'eyeHalo', 'eyeCenter', 'pupil', 'eyeball', 'bellows', 'lidTop', 'lidBot', 'dangerRing']) {
     el[k] = makeEl();
   }
@@ -74,22 +72,18 @@ function makeAnimator() {
     currentLedOpacity: '0.15',
     _timers: new Map(),
     _rafs: new Map(),
-    _anims: new Map(),
-    _calls: { resetBopLayer: 0, setLEDs: [], canceledAnims: [], clearedTimers: [], setHeadKeyframes: 0, setBellows: [], freezeHeadMotion: 0 },
+    _calls: { resetBopLayer: 0, setLEDs: [], clearedTimers: [], setHead: 0, setBellows: [], freezeHeadMotion: 0 },
 
     setTimeout(name, fn, delay) { this._timers.set(name, { fn, delay }); return name; },
     clearTimeout(name) { if (this._timers.has(name)) this._calls.clearedTimers.push(name); this._timers.delete(name); },
     requestRaf(name, fn) { this._rafs.set(name, fn); return name; },
     cancelRaf(name) { this._rafs.delete(name); },
-    cancelAnim(name) { this._calls.canceledAnims.push(name); this._anims.delete(name); },
-    playAnim(name) { this._anims.set(name, { cancel() {} }); return { cancel() {} }; },
-    setHead() {}, setBodySwivel() {}, resetBodySwivel() {},
-    setHeadKeyframes(frames, dur) { this._calls.setHeadKeyframes++; this._anims.set('head-keyframes', { cancel() {} }); return { cancel() {} }; },
+    setHead() { this._calls.setHead++; },
+    setBodySwivel() {}, resetBodySwivel() {},
     setLid() {}, setBaseLid(v) { this.currentBaseLid = v; },
     setPupil() {}, setBellows(p, d) { this._calls.setBellows.push([p, d]); },
     setLEDs(c, o) { this.currentLedColor = c; this.currentLedOpacity = o; this._calls.setLEDs.push([c, o]); },
-    freezeHeadMotion() { this._calls.freezeHeadMotion++; this.cancelAnim('head-keyframes'); },
-    resetGroove() { this.cancelRaf('dance-groove-raf'); },
+    freezeHeadMotion() { this._calls.freezeHeadMotion++; },
     resetBopLayer() {
       this._calls.resetBopLayer++;
       if (this.el.headBop) {
@@ -100,7 +94,6 @@ function makeAnimator() {
     stopAll() {
       for (const id of this._timers.keys()) this.clearTimeout(id);
       this._rafs.clear();
-      this._anims.clear();
     },
   };
   return a;
@@ -172,7 +165,7 @@ console.log('\n[1] Idle tap: layer isolation + selective pause + ARMED tail meld
   check('head-pose scheduler paused (idle-behavior cleared)', !a._timers.has('idle-behavior'));
   check('blink timer paused (idle-blink cleared)', !a._timers.has('idle-blink'));
   check('pupil darting survives (idle-pupil still live)', a._timers.has('idle-pupil'));
-  check('lid loop untouched (lid-loop not cancelled by bop)', !a._calls.canceledAnims.includes('lid-loop'));
+  // (The old WAAPI 'lid-loop' animation check is gone with the WAAPI layer.)
 
   const trace = pumpBop(card);
 
@@ -219,7 +212,6 @@ console.log('\n[3] Dancing tap: dance held during bop, released at meld/settle')
 {
   const card = makeCard('dancing');
   const a = card.animator;
-  a._anims.set('head-keyframes', { cancel() {} });
   const ledCallsBefore = a._calls.setLEDs.length;
 
   bopHead(card);
@@ -227,7 +219,6 @@ console.log('\n[3] Dancing tap: dance held during bop, released at meld/settle')
   check('dance hold flag set on tap', card._danceHeld === true);
   check('no idle-pose stop attempted (no idle timers cleared)', a._calls.clearedTimers.length === 0);
   check('in-flight head motion frozen on tap (freezeHeadMotion called)', a._calls.freezeHeadMotion === 1);
-  check('in-flight dance keyframes cancelled by freeze', a._calls.canceledAnims.includes('head-keyframes'));
   check('no LED writes by bop while dancing', a._calls.setLEDs.length === ledCallsBefore);
 
   const trace = pumpBop(card);
@@ -249,9 +240,9 @@ console.log('\n[4] dance.js hold: pose moves skipped while beat clock keeps tick
   // startDanceCycle calls step() once immediately; with the hold set it must
   // only advance the beat clock (dance-step timer) and skip every visual.
   check('beat clock still ticking under hold (dance-step timer set)', a._timers.has('dance-step'));
-  check('no pose keyframes while held', a._calls.setHeadKeyframes === 0);
+  check('no pose moves while held', a._calls.setHead === 0);
   check('no LED writes while held', a._calls.setLEDs.length === 0);
-  check('groove RAF running (residual bob decays, no new kicks)', a._rafs.has('dance-groove-raf'));
+  check('no RAF loops in the dance path', a._rafs.size === 0);
   // setBellows(0, 0.3) from stopDanceCycle's reset is allowed; no non-zero pump.
   check('no bellows pump while held', a._calls.setBellows.every(([p]) => p === 0));
 
@@ -259,8 +250,7 @@ console.log('\n[4] dance.js hold: pose moves skipped while beat clock keeps tick
   card._danceHeld = false;
   const stepFn = a._timers.get('dance-step');
   if (stepFn) stepFn.fn();
-  check('choreography resumes after hold release (keyframes set)', a._calls.setHeadKeyframes > 0);
-  check('groove RAF running after release', a._rafs.has('dance-groove-raf'));
+  check('choreography resumes after hold release (setHead fired)', a._calls.setHead > 0);
   check('LED writes resumed after release', a._calls.setLEDs.length > 0);
 }
 
@@ -417,32 +407,6 @@ console.log('\n[10] maxSeen meld threshold: fraction of actual peak, not theoret
     `posAtMeld=${Math.abs(resumedFrame.pos).toFixed(2)} peak*frac=${(peak * resumeFrac).toFixed(2)}`);
   check('maxSeen recorded on card', card._bopMaxSeen > 0);
   stopBop(card);
-}
-
-// ---- 11: Groove freeze while dance held + post-hold pose continuity ----
-console.log('\n[11] Groove freeze under hold; pose re-seeded on release');
-{
-  const card = makeCard('dancing', { bpm_entity: null });
-  const a = card.animator;
-  card._danceHeld = true;
-  startDanceCycle(card, 120);
-
-  // Pump the groove RAF under hold: the groove layer transform must be
-  // FROZEN (no writes) even though the RAF loop stays alive.
-  const grooveBefore = a.el.headGroove.style.transform || '';
-  let now = performance.now();
-  for (let i = 0; i < 10; i++) { now += 16.666; const fn = a._rafs.get('dance-groove-raf'); if (fn) fn(now); }
-  check('groove RAF stays alive under hold', a._rafs.has('dance-groove-raf'));
-  check('groove layer frozen under hold (no transform writes)',
-    (a.el.headGroove.style.transform || '') === grooveBefore);
-
-  // Release: the next step must re-seed the pose and produce choreography.
-  card._danceHeld = false;
-  const stepFn = a._timers.get('dance-step');
-  if (stepFn) stepFn.fn();
-  check('choreography resumes after release (keyframes set)', a._calls.setHeadKeyframes > 0);
-  check('groove resumes after release (transform written)',
-    (a.el.headGroove.style.transform || '') !== grooveBefore || a._rafs.has('dance-groove-raf'));
 }
 
 // ---- Spring sanity: shared oscillator still behaves ----

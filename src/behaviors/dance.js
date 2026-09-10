@@ -1,68 +1,63 @@
 /**
- * behaviors/dance.js — BPM-synced dance EXECUTION engine (phrase-driven).
+ * behaviors/dance.js — BPM-synced dance EXECUTION engine (phrase-driven,
+ * CSS-transition execution).
  *
  * Choreography (what pose on which beat) lives in behaviors/choreography.js:
  * 16-beat phrases with establish/develop/resolve arcs, a per-tier transition
  * graph, a 64-beat energy arc, seeded determinism, and the GLaDOS physical
  * laws (gravity dip, pendulum coupling, torso lag, on-beat reversals,
- * personality lids). This module only EXECUTES that choreography:
+ * personality lids). This module only EXECUTES that choreography.
  *
+ * EXECUTION MODEL — declarative CSS transitions (the legacy card's model):
+ * every beat computes its pose from the phrase engine and issues ONE
+ * setHead() write (transition + transform). The browser compositor
+ * interpolates the move even when the main thread janks, which is what kept
+ * the legacy card smooth on Android WebView (Tab S6 Lite) at high BPM. There
+ * is deliberately NO per-frame JS in the dance path:
+ *
+ *  - No WAAPI keyframes: the old per-beat cancel/create churn, cancel-snap
+ *    freeze, and getComputedStyle() live-pose reseeds are gone. CSS
+ *    transitions retarget smoothly from the head's CURRENT pose by design,
+ *    which eliminates the entire mid-flight-snap problem class.
+ *  - No groove spring: a continuous RAF-driven bob is phase-shifted from the
+ *    beat and never lands on it — it fought the choreography's PRECISION law
+ *    (deliberate, on-beat reversals) and cost a per-frame main-thread loop.
+ *    The organic feel comes from the choreography itself: GRAVITY dips,
+ *    bellows compression, and FLOW glides.
+ *  - Move styles map to easing + duration:
+ *      · HIT moves: short duration (<= 0.95x beat) so they finish before the
+ *        next beat; downbeats use an overshoot curve (windup->snap->settle
+ *        character in a single easing), offbeats a snappy ease-out.
+ *      · FLOW moves: long duration (up to 1.9x beat) with ease-in-out —
+ *        continuous travel; the next beat's transition retargets from the
+ *        live pose with no snap.
  *  - Beat timing uses performance.now() drift correction so moves stay
  *    locked to the music.
- *  - Groove spring layer (head-groove wrapper): continuous Y-bob driven by
- *    the shared damped oscillator; velocity is injected every beat
- *    (downbeats harder, tier 0 downbeats only) and at half-beat syncopation
- *    accents for tiers >= 125 BPM... er, >= 90 BPM (tier 1+).
- *  - Keyframed pose moves (WAAPI on the head): two move styles —
- *      · HIT moves: anticipation -> overshoot hit -> settle (downbeats),
- *        direct ease-in-out through a soft overshoot on offbeats.
- *      · FLOW moves: plain two-keyframe glide with ease-in-out, spanning
- *        up to ~1.9 beats (chill tier, release phrases, resolve handoffs).
- *  - Bellows pump is GRAVITY-COUPLED: the phrase's pump value compresses on
- *    the downbeat dip and releases on the rise (no flat per-tier pump).
- *  - Phrase driver: every 16 beats the graph walker picks the next phrase
- *    (energy-gated, seeded); beats 13-15 of each phrase resolve toward the
- *    next phrase's entry pose — a choreographed handoff, no damper needed.
+ *  - Bop hold: while a tap bop owns the head (_danceHeld) the beat clock
+ *    keeps ticking (phase stays synced) but every visual write is skipped;
+ *    the first post-hold setHead() retargets from the frozen pose.
  *
- * Smoothness guarantees (the anti-jerkiness contract):
- *  1. No move is ever cancelled mid-flight without a live-pose reseed: the
- *     next move starts from where the head ACTUALLY is (readHeadPose) whenever
- *     the previous move was a flow move that outlived its beat.
- *  2. Hit moves always finish inside the beat (<= 0.95x) so the head never
- *     freezes dead between beats.
- *  3. Phrase switches ease through the resolve handoff instead of jumping
- *     to the new phrase's full pose.
- *
- * Tracked resource names: 'dance-step', 'dance-led', 'dance-sync',
- * 'dance-sync-led', 'dance-groove-raf', 'head-keyframes' (WAAPI).
+ * Tracked resource names: 'dance-step', 'dance-led', 'dance-sync'.
  */
 
-import { createSpring } from './spring.js';
 import {
   getEnergy, pickNextPhrase, phraseVariant, getPhraseEntry, getBeatPose,
 } from './choreography.js';
 
-/**
- * Read the head's live pose [rot, tx, ty, scale] from its computed transform.
- * Used to seed choreography so a (re)start — or the move after a flow move
- * that was cut short — eases from where the head actually is instead of
- * snapping to a stale target. Defensive: returns neutral in stub
- * environments where getComputedStyle is unavailable.
- */
-function readHeadPose(a) {
-  try {
-    const t = getComputedStyle(a.el.head).transform;
-    if (!t || t === 'none') return [0, 0, 0, 1];
-    const m = t.match(/matrix\(([^)]+)\)/);
-    if (!m) return [0, 0, 0, 1];
-    const [m11, m12, , , e, f] = m[1].split(',').map(Number);
-    const scale = Math.sqrt(m11 * m11 + m12 * m12) || 1;
-    const rot = (Math.atan2(m12, m11) * 180) / Math.PI;
-    return [rot, e, f, scale];
-  } catch (err) {
-    return [0, 0, 0, 1];
-  }
-}
+// Easing vocabulary (single-write move character):
+//  - Downbeat HIT: overshoot curve — eases past the target then settles,
+//    approximating the old windup->hit->settle keyframe shape.
+//  - Offbeat HIT: fast attack, soft landing.
+//  - FLOW: plain ease-in-out glide.
+// Exported for the verify script's easing-contract assertions.
+export const DANCE_EASINGS = {
+  hitDown: 'cubic-bezier(0.34, 1.4, 0.64, 1)',
+  hitOff: 'cubic-bezier(0.2, 0.9, 0.3, 1)',
+  flow: 'ease-in-out',
+};
+const HIT_DOWN_EASE = DANCE_EASINGS.hitDown;
+const HIT_OFF_EASE = DANCE_EASINGS.hitOff;
+const FLOW_EASE = DANCE_EASINGS.flow;
 
 export function startDanceCycle(card, bpm) {
   const a = card.animator;
@@ -75,6 +70,7 @@ export function startDanceCycle(card, bpm) {
   let expectedNextTick = performance.now() + beatMs;
 
   const tierIdx = currentBpm < 90 ? 0 : currentBpm < 125 ? 1 : currentBpm < 160 ? 2 : 3;
+  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];   // tier-scaled eye pulse
 
   // ---- Phrase driver state ----
   // The dance always opens on phrase 0 (the tier's base groove move) — a
@@ -84,52 +80,10 @@ export function startDanceCycle(card, bpm) {
   let variant = phraseVariant(tierIdx, phraseId, phraseCount);
   let nextPhraseId = null; // picked at beat 12 so beats 13-15 can resolve
 
-  // ---- Groove spring layer (continuous organic bob on head-groove) ----
-  // Spring period ~2 beats so each injected beat kick produces one visible
-  // bounce that decays into the next. Damping 0.55: the bob sways instead of
-  // wobbling — a bouncy spring fighting the snappy pose hits reads as jerky.
-  const grooveOmega = Math.max(0.08, Math.min(0.3, (2 * Math.PI * 16.666) / (beatMs * 2)));
-  const groove = createSpring({ omega: grooveOmega, dampingRatio: 0.55, settleThreshold: 0.05 });
-  // Peak amplitude ~= velocity / omega; scale by tier (calmer tiers bob less).
-  const kickDown = (4 + tierIdx * 2) * grooveOmega;
-  const kickOff = kickDown * 0.55;
-
-  let lastGrooveTime = performance.now();
-  const grooveLoop = (now) => {
-    if (card._state !== 'dancing') return;
-    let frameTime = now - lastGrooveTime;
-    lastGrooveTime = now;
-    if (frameTime > 100) frameTime = 16.666;
-    // Bop hold: freeze the groove layer entirely — no physics steps, no
-    // transform writes — so the residual bob doesn't keep animating the
-    // head while the tap bop owns it. The RAF stays alive (just updating
-    // lastGrooveTime) so releasing the hold needs no loop restart and the
-    // spring resumes from exactly where it froze.
-    if (!card._danceHeld) {
-      groove.step(frameTime);
-      if (a.el.headGroove) {
-        a.el.headGroove.style.transform = `translate3d(0, ${groove.position.toFixed(2)}px, 0)`;
-      }
-    }
-    a.requestRaf('dance-groove-raf', grooveLoop);
-  };
-  a.requestRaf('dance-groove-raf', grooveLoop);
-
-  // ---- Keyframed pose layer state ----
-  // Seed from the head's live pose: on dance start (or a mid-dance restart)
-  // the first move must ease from where the head actually is, not teleport
-  // to a stale neutral pose.
-  let lastPose = readHeadPose(a);
-  const overshoot = [1.08, 1.12, 1.18, 1.25][tierIdx];    // hit overshoot factor
-  const windupFrac = [0.3, 0.25, 0.2, 0.15][tierIdx];     // wind-up share of the move
-  const eyeHitScale = [1.06, 1.1, 1.18, 1.25][tierIdx];   // tier-scaled eye pulse
-
-  let wasHeld = false;
-  // True when the previous pose move was a FLOW move (duration >= one beat).
-  // Such a move is still in flight when the next beat fires, so the next
-  // move must reseed from the head's LIVE pose (getComputedStyle) instead of
-  // the stale recorded target — otherwise the head snaps mid-glide.
-  let prevMoveFlow = false;
+  // Redundant-write guards: the LED color never changes during a dance and
+  // the halo only changes on peak phrases — skip identical style writes.
+  let lastLedOpacity = null;
+  let lastHalo = null;
 
   const step = () => {
     if (card._state !== 'dancing') return;
@@ -144,20 +98,10 @@ export function startDanceCycle(card, bpm) {
 
     // Bop hold: while a tap bop owns the head, the beat clock keeps ticking
     // (executeTick above) so phase stays synced to the music, but every
-    // visual move is skipped — groove kicks, LED/eye/bellows accents,
-    // syncopation, pose keyframes, body swivel, lid. The groove layer is
-    // frozen by the groove RAF loop. bop.js clears the flag at the meld
-    // point (tap_bop_resume threshold) or on settle.
-    if (card._danceHeld) { wasHeld = true; executeTick(); return; }
-
-    // Hold just released: re-seed lastPose from the head's live (frozen)
-    // transform so the first post-bop move eases from where the head
-    // actually is instead of teleporting to the stale pre-bop target.
-    if (wasHeld) {
-      lastPose = readHeadPose(a);
-      wasHeld = false;
-      prevMoveFlow = false;
-    }
+    // visual move is skipped. bop.js clears the flag at the meld point
+    // (tap_bop_resume threshold) or on settle; the first post-hold setHead()
+    // then retargets from the head's frozen pose with no snap.
+    if (card._danceHeld) { executeTick(); return; }
 
     const b = dancePhase % 16; // beat within the phrase
 
@@ -174,13 +118,6 @@ export function startDanceCycle(card, bpm) {
     const isDownBeat = b % 2 === 0;
     const energy = getEnergy(dancePhase);
 
-    // Beat kick into the groove spring: strong on the downbeat, softer
-    // offbeat. Tier 0 kicks on downbeats ONLY — its offbeat pose glide plus
-    // an offbeat spring kick double-bobbed the head (bob-without-dancing).
-    if (currentBpm >= 90 || isDownBeat) {
-      groove.injectVelocity(isDownBeat ? kickDown : kickOff);
-    }
-
     // ---- Choreography: this beat's pose from the phrase engine ----
     // At beat 12 the graph walker picks the NEXT phrase (energy-gated,
     // seeded); beats 13-15 then resolve toward its entry pose.
@@ -191,9 +128,11 @@ export function startDanceCycle(card, bpm) {
       ? getPhraseEntry(tierIdx, nextPhraseId) : null;
     const move = getBeatPose(tierIdx, phraseId, b, variant, energy, nextEntry);
 
-    a.setLEDs('#1DB954', '1');
+    // LED/eye accents (redundant-write guarded — identical values are skipped).
+    if (lastLedOpacity !== '1') { a.setLEDs('#1DB954', '1'); lastLedOpacity = '1'; }
     // Eye halo: peak phrases burn brighter (personality law).
-    a.el.eyeHalo.style.opacity = move.halo ? String(move.halo) : '0.5';
+    const halo = move.halo ? String(move.halo) : '0.5';
+    if (lastHalo !== halo) { a.el.eyeHalo.style.opacity = halo; lastHalo = halo; }
     // Eye pulse: #eye-center carries a short CSS transform transition (see
     // template.js), so this write pulses the pupil organically instead of
     // snapping it open/closed every beat.
@@ -203,34 +142,29 @@ export function startDanceCycle(card, bpm) {
     a.setBellows(move.pump, 0.12);
     a.setTimeout('dance-led', () => {
       if (card._state === 'dancing') {
-        a.setLEDs('#1DB954', '0.15');
+        if (lastLedOpacity !== '0.15') { a.setLEDs('#1DB954', '0.15'); lastLedOpacity = '0.15'; }
         a.el.eyeHalo.style.opacity = '0.05';
+        lastHalo = '0.05';
         a.el.eyeCenter.style.transform = 'scale(1)';
         a.setBellows(0, 0.3);
       }
     }, beatMs * 0.3);
 
-    // Syncopation: half-beat "and" accent for tier 1+ — a small
-    // counter-kick, pupil dart, and LED flicker keep it grooving, not
-    // marching. Counter-kick softened (0.35 of the offbeat kick): a hard
-    // reverse-kick mid-bounce jerked the groove spring against itself.
-    if (tierIdx >= 1) {
+    // Syncopation: half-beat "and" pupil accent for tier 1 only — at club/
+    // hardcore tempos the pose hits already fill every beat, and an extra
+    // half-beat timer per beat is main-thread work the tablet can't spare.
+    if (tierIdx === 1) {
       a.setTimeout('dance-sync', () => {
         if (card._state !== 'dancing') return;
-        groove.injectVelocity(-kickOff * 0.35);
         a.setPupil((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 3);
-        a.setLEDs('#1DB954', '0.5');
-        a.setTimeout('dance-sync-led', () => {
-          if (card._state === 'dancing') a.setLEDs('#1DB954', '0.15');
-        }, beatMs * 0.15);
       }, beatMs * 0.5);
     }
 
     // Move-duration clamp: hit moves must finish before the next beat
-    // (<= 0.95x) so they are never cancelled mid-flight and the head never
-    // freezes dead between beats. Flow moves are ALLOWED to outlive the
-    // beat (up to 1.9x) — continuous travel — and the prevMoveFlow reseed
-    // below keeps the next move snap-free.
+    // (<= 0.95x) so the head always lands on the beat and never freezes dead
+    // between beats. Flow moves are ALLOWED to outlive the beat (up to 1.9x)
+    // — continuous travel — and the next beat's transition simply retargets
+    // from wherever the head is (CSS transitions are snap-free by design).
     let moveDur = move.durBeats * beatSec;
     if (move.flow) {
       moveDur = Math.min(moveDur, beatSec * 1.9);
@@ -238,56 +172,11 @@ export function startDanceCycle(card, bpm) {
       moveDur = Math.min(moveDur, beatSec * 0.95);
     }
 
-    // Live-pose reseed: if the previous move was a flow move it was still in
-    // flight when this beat fired — the head is somewhere between the
-    // recorded lastPose and its target. Read the ACTUAL pose so the new move
-    // starts where the head is (no mid-glide snap). Hit moves always finish
-    // inside their beat, so the recorded target stays exact for them.
-    if (prevMoveFlow) {
-      lastPose = readHeadPose(a);
-    }
-
-    // Keyframed move construction:
-    //  - FLOW: two-keyframe ease-in-out glide from the live pose.
-    //  - HIT downbeat: wind up opposite the target (anticipation), snap
-    //    through a SOFT overshoot hit, settle on the target.
-    //  - HIT offbeat: direct ease-in-out through a soft overshoot.
-    const target = [move.r, move.tx, move.ty, move.s];
-    let frames;
-    if (move.flow) {
-      frames = [
-        { pose: lastPose, offset: 0, easing: 'ease-in-out' },
-        { pose: target },
-      ];
-    } else {
-      const hitPose = [move.r * overshoot, move.tx * overshoot, move.ty * overshoot, 1 + (move.s - 1) * overshoot];
-      if (isDownBeat) {
-        const wScale = [0.5, 0.3, 0.2, 0.15][tierIdx];
-        const windup = [0.22, 0.3, 0.38, 0.45][tierIdx];
-        const anti = [
-          -move.r * windup * wScale, -move.tx * windup * wScale,
-          -move.ty * windup * wScale, 1 - (move.s - 1) * windup * wScale * 0.5,
-        ];
-        frames = [
-          { pose: lastPose, offset: 0, easing: 'ease-in' },
-          { pose: anti, offset: windupFrac, easing: 'ease-out' },
-          { pose: hitPose, offset: windupFrac + (1 - windupFrac) * 0.55, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
-          { pose: target },
-        ];
-      } else {
-        frames = [
-          { pose: lastPose, offset: 0, easing: 'ease-in-out' },
-          { pose: hitPose, offset: 0.55, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' },
-          { pose: target },
-        ];
-      }
-    }
-    // Thread the tracked lastPose through as the frozen transform so the
-    // cancel-snap guard in playAnim() doesn't need a getComputedStyle()
-    // forced style recalc on every beat (expensive on tablet CPUs).
-    a.setHeadKeyframes(frames, moveDur, lastPose);
-    lastPose = target;
-    prevMoveFlow = move.flow;
+    // THE move: one transition + one transform write. The compositor
+    // interpolates off the main thread; retargeting mid-flight eases from
+    // the head's CURRENT pose (no cancel, no snap, no style recalc).
+    const ease = move.flow ? FLOW_EASE : (isDownBeat ? HIT_DOWN_EASE : HIT_OFF_EASE);
+    a.setHead(move.r, move.tx, move.ty, move.s, moveDur, ease);
 
     // Pupil dart accent (seeded from the phrase engine, not Math.random).
     if (move.dart) a.setPupil(move.dart[0], move.dart[1]);
@@ -312,18 +201,8 @@ export function stopDanceCycle(card) {
   a.clearTimeout('dance-step');
   a.clearTimeout('dance-led');
   a.clearTimeout('dance-sync');
-  a.clearTimeout('dance-sync-led');
-  // Freeze the live head pose into the inline style BEFORE cancelling the
-  // keyframe animation: cancelling a fill:'forwards' WAAPI animation makes
-  // the element fall back to its stale base transform for a frame (snap).
-  try {
-    const t = getComputedStyle(a.el.head).transform;
-    if (t && t !== 'none') {
-      a.el.head.style.transition = 'none';
-      a.el.head.style.transform = t;
-    }
-  } catch (err) { /* stub environments */ }
-  a.cancelAnim('head-keyframes');
-  a.resetGroove();
+  // CSS transitions complete on their own — there is no WAAPI animation to
+  // cancel and no fill:forwards snap. The head glides to its last target and
+  // the next state's setHead() retargets it from there.
   a.setBellows(0, 0.3);
 }

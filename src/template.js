@@ -32,19 +32,18 @@ export function buildTemplate(config) {
       /* ---- Compositor-layer promotion ----
          Every group animated via transform gets will-change: transform so the
          browser hoists it to its own GPU layer: per-frame transform writes
-         (RAF spring loop, WAAPI keyframes, CSS transitions) then composite on
-         the GPU instead of triggering main-thread SVG repaints. Applied ONLY
-         to groups that actually animate — each hint costs GPU memory. */
-      #axidos-head, #head-groove, #head-bop, #torso-swivel, #bellows,
+         (RAF spring loop, CSS transitions) then composite on the GPU instead
+         of triggering main-thread SVG repaints. Applied ONLY to groups that
+         actually animate — each hint costs GPU memory. */
+      #axidos-head, #head-bop, #torso-swivel, #bellows,
       #eyeball-assembly, #eye-pupil, #eye-lid, #eye-lid-bottom, #eye-center {
         will-change: transform;
       }
       /* Rotation/scale groups need view-box coordinates for transform-origin. */
       #axidos-head, #head-bop, #torso-swivel, #eye-center { transform-box: view-box; }
       /* Bop layer: dedicated transform group for the tap-bop spring so it
-         composes additively with idle poses (#axidos-head) and the dance
-         groove bob (#head-groove) instead of fighting over one transform.
-         Pivots at the neck like #axidos-head. */
+         composes additively with the head poses (#axidos-head) instead of
+         fighting over one transform. Pivots at the neck like #axidos-head. */
       #head-bop { transform-origin: 140px 285px; }
 
       .led-dot, #ind-l1, #ind-l2, #ind-r1, #ind-r2 { transition: opacity 0.15s ease-out; fill: var(--led-color); opacity: var(--led-opacity); }
@@ -157,7 +156,6 @@ export function buildTemplate(config) {
         <g id="axidos-head-wrapper" transform="translate(0, -65)">
           <g id="head-sway-pivot">
             <g id="axidos-head">
-              <g id="head-groove">
               <g id="head-bop">
               <ellipse cx="140" cy="285" rx="18" ry="6" fill="#181824" stroke="#0a0a0f" stroke-width="1"/>
               <ellipse cx="140" cy="285" rx="12" ry="3.8" fill="#101015" stroke="#181824" stroke-width="0.6"/>

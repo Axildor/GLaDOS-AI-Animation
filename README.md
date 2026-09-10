@@ -22,12 +22,11 @@ When your configured media player starts playing, AXiDOS enters a dedicated **Sp
 
 Instead of a basic looped animation, she features a **Phrase-Graph Choreography Engine** that actively reads the tempo of your music and dances in **16-beat phrases** — named moves like *pendulum sway*, *dip & loom*, and *servo stutter* that mimic how a suspended robotic head would actually groove. A transition graph chains phrases into each other (no jarring style teleports), and a 64-beat **energy arc** gives the dance verse/chorus dynamics: she grooves, builds, peaks, and releases like she's actually performing the song.
 
-Her movement is built from three composable layers, the same way a real puppeteer works:
-* **Groove Spring** — a physics-driven bob that gets a "kick" on every beat (harder on downbeats), so she never looks like she's marching to a metronome.
-* **Keyframed Moves** — every pose change plays a cartoon-style *anticipation → hit → settle* sequence: she winds up opposite the move, snaps through with overshoot, then lands on the pose.
+Her movement is built from composable layers, the same way a real puppeteer works:
+* **Compositor Moves** — every pose change is a single declarative CSS transition that the browser interpolates on the GPU, so the dance stays butter-smooth even on modest tablet hardware. Snappy moves land inside the beat with an overshoot curve; flowing moves glide across beats.
 * **Physical Laws** — every move obeys her anatomy: she *dips into* the downbeat (gravity), her head swings in an arc rather than sliding sideways (pendulum), her torso swivel lags behind the head like a slow groove, and direction reversals land exactly on the beat (mechanical precision).
 * **Choreographed Handoffs** — the last 3 beats of every phrase glide toward the next phrase's entry pose, so style switches read as deliberate transitions, not pose teleports.
-* **Syncopation & Breathing** — at 90+ BPM she adds half-beat "and" accents (counter-kicks, eye darts, LED flickers), and her bellows compresses on the downbeat dip and releases on the rise — she breathes *with* the beat.
+* **Breathing** — her bellows compresses on the downbeat dip and releases on the rise — she breathes *with* the beat.
 
 Her personality shifts depending on the speed of the music:
 * **Chill & Soulful (< 90 BPM):** Fluid, heavily relaxed glides — *pendulum sway*, *crane sweep*, *slow loom* — with heavy eyelids.
@@ -87,7 +86,7 @@ tap_action:
 | `tap_speed` | number | Optional | Bop animation speed, `0.1` (slow) – `2.0` (fast). Default is `0.5`. |
 | `tap_bounces` | number | Optional | Rebound oscillations before settling, `1`–`20`. Default is `5`. |
 | `tap_intensity` | number | Optional | How far the head pulls back, `0.5`–`2`. Default is `1.0`. |
-| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of the actual peak bounce) where the paused background resumes, `0.05`–`0.8`. Default is `0.3`. Tapping freezes all in-flight head motion (idle poses, dance keyframes, and the dance groove bob) so the bop owns the head exclusively — the beat clock keeps running, so the dance stays synced — and the background melds back in at this point while the last small bounces are still finishing. The peak is measured once at the top of the first bounce, so the resume point is exact and the slider is honest. Re-tapping mid-bop always amplifies the bounce (energy-add kick, never dampens, no matter where in the swing you tap) and re-arms the meld point from the new bounce's peak. |
+| `tap_bop_resume` | number | Optional | Point in the bop tail (fraction of the actual peak bounce) where the paused background resumes, `0.05`–`0.8`. Default is `0.3`. Tapping freezes all in-flight head motion (idle poses and dance moves) so the bop owns the head exclusively — the beat clock keeps running, so the dance stays synced — and the background melds back in at this point while the last small bounces are still finishing. The peak is measured once at the top of the first bounce, so the resume point is exact and the slider is honest. Re-tapping mid-bop always amplifies the bounce (energy-add kick, never dampens, no matter where in the swing you tap) and re-arms the meld point from the new bounce's peak. |
 
 ## 🧑‍💻 Development
 
@@ -108,7 +107,7 @@ The card source lives in small, focused ES modules under `src/` and is bundled i
 | `src/behaviors/dance.js` | BPM-synced dance execution engine (phrase driver) |
 | `src/behaviors/talk.js` | Responding-state talk animation |
 | `src/behaviors/bop.js` | Spring-physics tap bop |
-| `src/behaviors/spring.js` | Shared damped-oscillator spring physics |
+| `src/behaviors/spring.js` | Damped-oscillator spring physics (tap bop) |
 
 ### Building
 

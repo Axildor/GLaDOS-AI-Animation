@@ -2,10 +2,9 @@
  * behaviors/bop.js — Spring-physics tap bop on a dedicated head layer.
  *
  * Fixed-timestep damped harmonic oscillator (shared spring.js) drives the
- * #head-bop SVG group — a transform layer nested INSIDE #head-groove, so the
+ * #head-bop SVG group — a transform layer nested INSIDE #axidos-head, so the
  * bop composes additively with whatever else is animating the head:
- *   #axidos-head   — idle poses / dance WAAPI keyframes
- *   #head-groove   — dance groove spring bob
+ *   #axidos-head   — idle poses / dance CSS-transition moves
  *   #head-bop      — tap bop spring (this file)
  *
  * Because the bop no longer owns #axidos-head's transform, background motion
@@ -16,9 +15,9 @@
  *    while the tail bounces finish — the bop tail "melds" back into the
  *    idle animation instead of ending on a frozen frame.
  *  - dancing: the dance engine is HELD on tap — the beat clock keeps ticking
- *    (phase stays synced to the music) but pose moves, groove kicks, and
- *    LED/eye/bellows accents are skipped. The residual groove bob decays
- *    naturally, then the dance resumes at the same tap_bop_resume threshold.
+ *    (phase stays synced to the music) but pose moves and LED/eye/bellows
+ *    accents are skipped. The dance resumes at the same tap_bop_resume
+ *    threshold; its first post-hold move retargets from the frozen pose.
  *
  * The resume check is ARMED: it only trips after the spring has actually
  * bounced ABOVE the threshold once. Without arming, the spring's first
@@ -47,11 +46,10 @@ import { createSpring } from './spring.js';
  */
 function pauseBackground(card, isDancing) {
   // Freeze in-flight motion FIRST: pausing the idle scheduler or holding the
-  // dance only stops NEW moves — a pose transition or keyframe animation
-  // already mid-flight would keep animating #axidos-head while the bop
-  // spring bounces #head-bop (two animations fighting over the head).
-  // freezeHeadMotion() snapshots the live transforms inline (transition
-  // disabled) and cancels the tracked head-keyframes WAAPI animation.
+  // dance only stops NEW moves — a pose transition already mid-flight would
+  // keep animating #axidos-head while the bop spring bounces #head-bop (two
+  // animations fighting over the head). freezeHeadMotion() snapshots the
+  // live transforms inline with the transition disabled.
   card.animator.freezeHeadMotion();
   if (isDancing) {
     card._danceHeld = true;
@@ -123,7 +121,7 @@ export function bopHead(card) {
 
   const spring = createSpring({ omega, dampingRatio });
   // Seed the oscillator: a fresh spring starts at rest and would settle on
-  // the first frame with zero visible motion. Mirrors the dance groove kick.
+  // the first frame with zero visible motion.
   spring.injectVelocity(initialVelocity);
   card._bopSpring = spring;
   // Mark the bop active only after the spring exists: if anything above
